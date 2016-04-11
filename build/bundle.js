@@ -56,7 +56,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	'use strict';
 
-	function _typeof(obj) { return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj; }
+	var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj; };
 
 	var antlr4 = __webpack_require__(1);
 	var fhirpath = __webpack_require__(46);
@@ -111,7 +111,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 
 	        return fn.apply(null, [coll, context].concat(rest.map(function (i) {
-	            return run(coll, withTree(context, i));
+	            return run([context.root], withTree(context, i));
 	        })));
 	    };
 	};
@@ -123,8 +123,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }, {});
 	};
 
-	var countUniqueValues = function countUniqueValues(rows) {
-	    return Object.keys(uniqueValueMap(rows)).length;
+	var getUniqueValues = function getUniqueValues(rows) {
+	    var unique = {};
+	    var distinct = [];
+	    for (var i = 0; i < rows.length; i++) {
+	        if (typeof unique[JSON.stringify(rows[i])] == "undefined") {
+	            distinct.push(rows[i]);
+	        }
+	        unique[JSON.stringify(rows[i])] = 0;
+	    }
+	    return distinct;
 	};
 
 	var allPaths = function allPaths(item) {
@@ -159,15 +167,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }) : item;
 	        if (axis === "**") return allPaths(item).slice(1);
 	        if (axis === "$context") return context.root;
+	        if (axis === "$this") return (typeof item === 'undefined' ? 'undefined' : _typeof(item)) === "object" ? Object.keys(item).flatMap(function (s) {
+	            return item[s];
+	        }).filter(function (x) {
+	            return !!x;
+	        }) : item;
 	        throw new Error("Unsupported asis: " + axis);
 	    }),
 	    "$where": applyToEach(function (item, context, conditions) {
 	        return coerce.boolean(run([item], withTree(context, conditions))) ? [item] : [];
 	    }),
+	    "$select": applyToEach(function (item, context, conditions) {
+	        return run([item], withTree(context, conditions));
+	    }),
 	    "$constant": function $constant(_, context, val) {
 	        return [val];
 	    },
 	    "$first": function $first(coll) {
+	        return coll.slice(0, 1);
+	    },
+	    "$single": function $single(coll) {
+	        if (coll.length > 1) {
+	            throw new Error('single: Input collection contains more than one element');
+	        }
 	        return coll.slice(0, 1);
 	    },
 	    "$last": function $last(coll) {
@@ -187,11 +209,95 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }),
 	    // TODO: Clarify what collections are accepted by substring
 	    "$substring": resolveArguments(function (coll, context, start, count) {
-	        if (coll.length !== 1) return [];
-	        if (typeof coll[0] !== "string") return [];
+	        validateStringManipulation(coll, 'substring');
 	        var input = coll[0];
-	        var end = count !== undefined ? start + count : input.length;
-	        return [input.slice(start, end)];
+	        var end = count !== undefined ? start[0] + count[0] : input.length;
+	        if (typeof input !== 'undefined') {
+	            return [input.slice(start[0], end)];
+	        }
+	        return [];
+	    }),
+	    "$startsWith": resolveArguments(function (coll, context, searchColl) {
+	        validateStringManipulationWithParam(coll, searchColl, 'startsWith');
+	        var input = coll[0],
+	            searchString = searchColl[0];
+	        if (typeof input !== 'undefined') {
+	            return [input.indexOf(searchString) === 0];
+	        }
+	        return [];
+	    }),
+	    "$endsWith": resolveArguments(function (coll, context, searchColl) {
+	        validateStringManipulationWithParam(coll, searchColl, 'endsWith');
+	        if (typeof coll[0] !== 'undefined') {
+	            var input = coll[0],
+	                position = input.length - searchColl[0].length,
+	                lastIndext = input.indexOf(searchColl[0], position);
+
+	            return [lastIndext !== -1 && lastIndext === position];
+	        }
+	        return [];
+	    }),
+	    "$matches": resolveArguments(function (coll, context, regularEx) {
+	        validateStringManipulationWithParam(coll, regularEx, 'matches');
+	        var input = coll[0],
+	            regularExInput = regularEx[0];
+	        if (typeof input !== 'undefined') {
+	            var matchesResult = input.match(regularExInput);
+	            if (matchesResult.length == 1) {
+	                return [input === matchesResult[0]];
+	            } else {
+	                return [false];
+	            }
+	        }
+	        return [];
+	    }),
+	    "$replaceMatches": resolveArguments(function (coll, context, regularEx, replaceColl) {
+	        validateStringManipulationWithParam(coll, replaceColl, 'replaceMatches');
+
+	        var input = coll[0],
+	            regularExInput = regularEx[0].replace(/\\\\/g, '\\'),
+	            replaceString = replaceColl[0],
+	            re = new RegExp(regularExInput, "g");
+	        if (typeof input !== 'undefined') {
+
+	            return [input.replace(re, replaceString)];
+	        }
+	        return [];
+	    }),
+	    "$replace": resolveArguments(function (coll, context, regularEx, replaceColl) {
+	        validateStringManipulationWithParam(coll, replaceColl, 'replace');
+	        var input = coll[0],
+	            regularExInput = regularEx[0],
+	            replaceString = replaceColl[0];
+	        if (typeof input != 'undefined') {
+	            return [replaceAll(input, regularExInput, replaceString)];
+	        }
+	        return [];
+	    }),
+	    "$subsetOf": resolveArguments(function (coll, context, paramColl) {
+	        var isarraySubset = isSubsetOf(coll, paramColl);
+	        return [isarraySubset];
+	    }),
+	    "$supersetOf": resolveArguments(function (coll, context, paramColl) {
+	        var isarraySubset = isSubsetOf(paramColl, coll);
+	        return [isarraySubset];
+	    }),
+	    "$contains": resolveArguments(function (coll, context, searchString) {
+	        validateStringManipulationWithParam(coll, searchString, 'contains');
+	        var input = coll[0],
+	            searchStringInput = searchString[0];
+	        if (typeof input !== 'undefined') {
+	            return [input.indexOf(searchString) !== -1];
+	        }
+	        return [];
+	    }),
+	    "$length": resolveArguments(function (coll, context) {
+	        validateStringManipulation(coll, 'length');
+	        var input = coll[0];
+	        if (typeof input !== 'undefined') {
+	            return [input.length];
+	        }
+	        return [];
 	    }),
 	    "$empty": function $empty(coll) {
 	        return [coll.length === 0];
@@ -199,8 +305,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    "$not": function $not(coll) {
 	        return [!coerce.boolean(coll)];
 	    },
-	    "$all": function $all(coll, context, conditions) {
-	        return [functionBank.$where(coll, conditions).length === coll.length];
+	    "$all": function $all(coll) {
+	        return [coerce.boolean(coll)];
 	    },
 	    "$any": function $any(coll, context, conditions) {
 	        return [functionBank.$where(coll, context, conditions).length > 0];
@@ -211,33 +317,157 @@ return /******/ (function(modules) { // webpackBootstrap
 	    "$lookup": function $lookup(coll, context, tag) {
 	        return [lookup(tag, context)];
 	    },
-
-	    // TODO how does asInteger convert "5.6", or *numbers* e.g. from count()?
-	    "$asInteger": resolveArguments(function (coll, context) {
-	        var val = coerce.integer(coll);
-	        return isNaN(val) ? [] : [val];
-	    }),
-	    "$distinct": function $distinct(coll, context) {
-	        for (var _len3 = arguments.length, rest = Array(_len3 > 2 ? _len3 - 2 : 0), _key3 = 2; _key3 < _len3; _key3++) {
-	            rest[_key3 - 2] = arguments[_key3];
+	    "$iif": function $iif(coll, context, criteriumExp, trueExp, otherwiseExpr) {
+	        var criteriumResult = run(coll, withTree(context, criteriumExp));
+	        if (coerce.boolean(criteriumResult)) {
+	            return run(coll, withTree(context, trueExp));
+	        } else {
+	            return run(coll, withTree(context, otherwiseExpr));
 	        }
-
-	        return [coll.length === countUniqueValues(coll.map(function (item) {
-	            return rest.map(function (path) {
-	                return run([item], withTree(context, path));
-	            });
-	        }))];
+	    },
+	    // TODO how does asInteger convert "5.6", or *numbers* e.g. from count()
+	    "$toInteger": function $toInteger(coll) {
+	        return parseNumber(coll, parseInt, 'toInteger', 'toInteger: Incompatible item. Item must be integer, string that is convertible to integer or a boolean (true/false).');
+	    },
+	    "$toDecimal": function $toDecimal(coll) {
+	        return parseNumber(coll, parseFloat, 'toDecimal', 'toDecimal: Incompatible item. Item must be decimal, string that is convertible to decimal or a boolean (true/false).');
+	    },
+	    "$toString": function $toString(coll) {
+	        validateOnlyOneElementInCollection(coll, 'toString');
+	        if (_typeof(coll[0]) !== "object") {
+	            return coll[0].toString();
+	        } else {
+	            throw new Error('toString: Incompatible item. Item must be a string, a number or a boolean (true/false).');
+	        }
+	    },
+	    "$isDistinct": function $isDistinct(coll, context) {
+	        return [coll.length === getUniqueValues(coll).length];
+	    },
+	    "$distinct": function $distinct(coll, context) {
+	        return [getUniqueValues(coll)];
+	    },
+	    "$exists": function $exists(coll) {
+	        var isEmptyColl = functionBank.$empty(coll);
+	        return [!isEmptyColl[0]];
+	    },
+	    // TODO startsWith probably needs an argument
+	    // and why does .startsWith act as a filter, while .matches returns a boolean?
+	    "$today": function $today() {
+	        return [new Date().toLocaleDateString()];
+	    },
+	    "$now": function $now() {
+	        return [new Date().toString()];
 	    }
 	};
 
-	// TODO startsWith probably needs an argument
-	// and why does .startsWith act as a filter, while .matches returns a boolean?
 	var whenSingle = function whenSingle(fn) {
 	    return function (lhs, rhs) {
 	        if (lhs.length !== 1 || rhs.length !== 1) return [];
 	        return fn(lhs[0], rhs[0]);
 	    };
 	};
+	//TODO: compare types?
+	var whenSingleComparison = function whenSingleComparison(fn) {
+	    return function (lhs, rhs) {
+	        if (lhs.length === 0 || rhs.length === 0) return [];
+	        if (lhs.length !== 1 || rhs.length !== 1) return false;
+	        return fn(lhs[0], rhs[0]);
+	    };
+	};
+
+	function validateMathOperation(lhs, rhs, fnName) {
+
+	    var errorMessage = checkForMoreThanOneElementInExpression(rhs, lhs, fnName);
+	    if (errorMessage != null) {
+	        throw new Error(errorMessage);
+	    }
+
+	    if (_typeof(lhs[0]) !== _typeof(rhs[0])) {
+	        throw new Error(fnName + ': Operands must be of the same type.');
+	    }
+
+	    //TODO: check if both are numbers
+	}
+
+	function checkForMoreThanOneElementInExpression(lhs, rhs, functName) {
+	    var errorMessage = null;
+
+	    if (lhs.length !== 1 || rhs.length !== 1) {
+	        errorMessage = functName + 'Expression contains more than one element.';
+	    }
+
+	    return errorMessage;
+	}
+
+	function parseNumber(coll, parseFunction, funcName, validationMessage) {
+
+	    validateOnlyOneElementInCollection(coll, funcName);
+	    if (!isNaN(coll[0]) && _typeof(coll[0]) !== "object") {
+
+	        if (coll[0] === true) {
+	            return [1];
+	        } else if (coll[0] === false) {
+	            return [0];
+	        } else {
+	            return [parseFunction.call(null, coll[0])];
+	        }
+	    } else {
+	        throw new Error(validationMessage);
+	    }
+	}
+
+	function validateStringManipulationWithParam(coll, paramColl, functName) {
+	    validateStringManipulation(coll, functName);
+	    validateStringManipulationParams(paramColl, functName);
+	}
+
+	function validateStringManipulation(coll, functName) {
+	    checkMoreThanOneElementInCollection(coll, functName, ': input collection contains more than one element.');
+	    checkIsCompatibleString(coll[0], functName, ': Incompatible item. Item must be of type string.');
+	}
+
+	function validateStringManipulationParams(coll, functName) {
+	    checkMoreThanOneElementInCollection(coll, functName, ': parameter collection contains more than one element.');
+	    checkIsCompatibleString(coll[0], functName, ': Incompatible item. Parameter must be of type string.');
+	}
+
+	function validateOnlyOneElementInCollection(coll, functName) {
+	    checkMoreThanOneElementInCollection(coll, functName, ': parameter collection contains more than one element.');
+	}
+
+	function checkMoreThanOneElementInCollection(coll, functName, errorMessage) {
+	    if (coll.length > 1) {
+	        throw new Error(functName + errorMessage);
+	    }
+	}
+
+	function checkIsCompatibleString(inputValue, functName, errorMessage) {
+	    if (typeof inputValue !== 'undefined' && typeof inputValue !== "string") {
+	        throw new Error(functName + errorMessage);
+	    }
+	}
+
+	function isSubsetOf(inputCollection, destinationCollection) {
+	    var isarraySubset = inputCollection.every(function (val) {
+	        for (var index = 0; index < destinationCollection.length; index++) {
+	            var element = destinationCollection[index];
+	            if (JSON.stringify(val) === JSON.stringify(element)) {
+	                return true;
+	            }
+	        }
+	        return false;
+	    });
+
+	    return isarraySubset;
+	}
+
+	function replaceAll(str, find, replace) {
+	    return str.replace(new RegExp(escapeRegExp(find), 'g'), replace);
+	}
+
+	function escapeRegExp(str) {
+	    return str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
+	}
 
 	var operatorBank = {
 	    "=": function _(lhs, rhs) {
@@ -249,16 +479,32 @@ return /******/ (function(modules) { // webpackBootstrap
 	        });
 	    },
 	    "|": function _(lhs, rhs) {
-	        return lhs.concat(rhs);
+	        return getUniqueValues(lhs.concat(rhs));
 	    },
-	    "+": whenSingle(function (lhs, rhs) {
-	        if ((typeof lhs === 'undefined' ? 'undefined' : _typeof(lhs)) !== (typeof rhs === 'undefined' ? 'undefined' : _typeof(rhs))) return [];
-	        return [lhs + rhs];
-	    }),
-	    "-": whenSingle(function (lhs, rhs) {
-	        if ((typeof lhs === 'undefined' ? 'undefined' : _typeof(lhs)) !== (typeof rhs === 'undefined' ? 'undefined' : _typeof(rhs))) return [];
-	        return [lhs - rhs];
-	    }),
+	    "+": function _(lhs, rhs) {
+	        validateMathOperation(lhs, rhs, "+");
+	        return [lhs[0] + rhs[0]];
+	    },
+	    "*": function _(lhs, rhs) {
+	        validateMathOperation(lhs, rhs, "*");
+	        return [lhs[0] * rhs[0]];
+	    },
+	    "/": function _(lhs, rhs) {
+	        validateMathOperation(lhs, rhs, "/");
+	        return [lhs[0] / rhs[0]];
+	    },
+	    "-": function _(lhs, rhs) {
+	        validateMathOperation(lhs, rhs, "-");
+	        return [lhs[0] - rhs[0]];
+	    },
+	    "div": function div(lhs, rhs) {
+	        validateMathOperation(lhs, rhs, "div");
+	        return [Math.floor(lhs[0] / rhs[0])];
+	    },
+	    "mod": function mod(lhs, rhs) {
+	        validateMathOperation(lhs, rhs, "mod");
+	        return [lhs[0] % rhs[0]];
+	    },
 	    "&": whenSingle(function (lhs, rhs) {
 	        if ((typeof lhs === 'undefined' ? 'undefined' : _typeof(lhs)) !== (typeof rhs === 'undefined' ? 'undefined' : _typeof(rhs))) return [];
 	        return [lhs + rhs];
@@ -271,6 +517,25 @@ return /******/ (function(modules) { // webpackBootstrap
 	    },
 	    "xor": function xor(lhs, rhs) {
 	        return [coerce.boolean(lhs) !== coerce.boolean(rhs)];
+	    },
+	    "implies": function implies(lhs, rhs) {
+	        var lhsCoerceResult;
+	        if (lhs.length === 0) {
+	            if (rhs.length === 0) {
+	                return [];
+	            } else if (coerce.boolean(rhs) === true) {
+	                return [true];
+	            } else {
+	                return [];
+	            }
+	        } else {
+	            lhsCoerceResult = coerce.boolean(lhs);
+	            if (lhsCoerceResult === true) {
+	                return [coerce.boolean(rhs)];
+	            } else if (lhsCoerceResult === false) {
+	                return [true];
+	            }
+	        }
 	    },
 	    "in": function _in(lhs, rhs) {
 	        var lhsMap = uniqueValueMap(lhs);
@@ -287,17 +552,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	            return !x;
 	        });
 	    },
-	    ">": whenSingle(function (lhs, rhs) {
-	        return [lhs[0] > rhs[0]];
+	    ">": whenSingleComparison(function (lhs, rhs) {
+	        return [lhs > rhs];
 	    }),
-	    "<": whenSingle(function (lhs, rhs) {
-	        return [lhs[0] < rhs[0]];
+	    "<": whenSingleComparison(function (lhs, rhs) {
+	        return [lhs < rhs];
 	    }),
-	    ">=": whenSingle(function (lhs, rhs) {
-	        return [lhs[0] >= rhs[0]];
+	    ">=": whenSingleComparison(function (lhs, rhs) {
+	        return [lhs >= rhs];
 	    }),
-	    "<=": whenSingle(function (lhs, rhs) {
-	        return [lhs[0] <= rhs[0]];
+	    "<=": whenSingleComparison(function (lhs, rhs) {
+	        return [lhs <= rhs];
 	    })
 	};
 
@@ -12945,13 +13210,13 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 47 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated from fhirpath.g4 by ANTLR 4.5.1
+	// Generated from fhirpath.g4 by ANTLR 4.5.2
 	// jshint ignore: start
 	var antlr4 = __webpack_require__(1);
 
 
 	var serializedATN = ["\u0003\u0430\ud6d1\u8206\uad2d\u4417\uaef1\u8d80\uaadd",
-	    "\u0002\u001c\u0102\b\u0001\u0004\u0002\t\u0002\u0004\u0003\t\u0003\u0004",
+	    "\u0002,\u0148\b\u0001\u0004\u0002\t\u0002\u0004\u0003\t\u0003\u0004",
 	    "\u0004\t\u0004\u0004\u0005\t\u0005\u0004\u0006\t\u0006\u0004\u0007\t",
 	    "\u0007\u0004\b\t\b\u0004\t\t\t\u0004\n\t\n\u0004\u000b\t\u000b\u0004",
 	    "\f\t\f\u0004\r\t\r\u0004\u000e\t\u000e\u0004\u000f\t\u000f\u0004\u0010",
@@ -12959,171 +13224,202 @@ return /******/ (function(modules) { // webpackBootstrap
 	    "\u0004\u0014\t\u0014\u0004\u0015\t\u0015\u0004\u0016\t\u0016\u0004\u0017",
 	    "\t\u0017\u0004\u0018\t\u0018\u0004\u0019\t\u0019\u0004\u001a\t\u001a",
 	    "\u0004\u001b\t\u001b\u0004\u001c\t\u001c\u0004\u001d\t\u001d\u0004\u001e",
-	    "\t\u001e\u0004\u001f\t\u001f\u0004 \t \u0004!\t!\u0004\"\t\"\u0003\u0002",
-	    "\u0003\u0002\u0003\u0003\u0003\u0003\u0003\u0004\u0003\u0004\u0003\u0005",
-	    "\u0003\u0005\u0003\u0006\u0003\u0006\u0003\u0007\u0003\u0007\u0003\b",
-	    "\u0003\b\u0003\t\u0003\t\u0003\n\u0003\n\u0003\u000b\u0003\u000b\u0003",
-	    "\f\u0003\f\u0003\r\u0003\r\u0003\u000e\u0003\u000e\u0003\u000e\u0003",
-	    "\u000f\u0003\u000f\u0003\u000f\u0003\u000f\u0003\u000f\u0003\u000f\u0003",
-	    "\u000f\u0003\u000f\u0003\u000f\u0003\u0010\u0003\u0010\u0003\u0010\u0003",
-	    "\u0010\u0003\u0010\u0003\u0010\u0003\u0010\u0003\u0010\u0003\u0010\u0003",
-	    "\u0010\u0003\u0011\u0003\u0011\u0003\u0011\u0003\u0011\u0003\u0011\u0003",
-	    "\u0011\u0003\u0011\u0003\u0011\u0003\u0012\u0003\u0012\u0003\u0013\u0003",
-	    "\u0013\u0003\u0013\u0003\u0013\u0003\u0013\u0003\u0013\u0003\u0013\u0003",
-	    "\u0013\u0005\u0013\u0086\n\u0013\u0003\u0014\u0003\u0014\u0003\u0014",
-	    "\u0003\u0014\u0003\u0014\u0003\u0014\u0003\u0014\u0003\u0014\u0003\u0014",
-	    "\u0003\u0014\u0003\u0014\u0003\u0014\u0005\u0014\u0094\n\u0014\u0003",
-	    "\u0015\u0003\u0015\u0003\u0015\u0003\u0015\u0003\u0015\u0003\u0015\u0003",
-	    "\u0015\u0003\u0015\u0003\u0015\u0005\u0015\u009f\n\u0015\u0003\u0016",
-	    "\u0003\u0016\u0003\u0016\u0003\u0016\u0007\u0016\u00a5\n\u0016\f\u0016",
-	    "\u000e\u0016\u00a8\u000b\u0016\u0003\u0017\u0003\u0017\u0003\u0017\u0007",
-	    "\u0017\u00ad\n\u0017\f\u0017\u000e\u0017\u00b0\u000b\u0017\u0003\u0017",
-	    "\u0003\u0017\u0003\u0017\u0003\u0017\u0007\u0017\u00b6\n\u0017\f\u0017",
-	    "\u000e\u0017\u00b9\u000b\u0017\u0003\u0017\u0005\u0017\u00bc\n\u0017",
-	    "\u0003\u0018\u0003\u0018\u0003\u0018\u0005\u0018\u00c1\n\u0018\u0003",
-	    "\u0019\u0003\u0019\u0003\u0019\u0003\u0019\u0003\u0019\u0003\u0019\u0003",
-	    "\u001a\u0003\u001a\u0003\u001b\u0003\u001b\u0003\u001b\u0006\u001b\u00ce",
-	    "\n\u001b\r\u001b\u000e\u001b\u00cf\u0003\u001b\u0005\u001b\u00d3\n\u001b",
-	    "\u0003\u001b\u0003\u001b\u0003\u001b\u0003\u001b\u0005\u001b\u00d9\n",
-	    "\u001b\u0003\u001c\u0003\u001c\u0003\u001c\u0007\u001c\u00de\n\u001c",
-	    "\f\u001c\u000e\u001c\u00e1\u000b\u001c\u0005\u001c\u00e3\n\u001c\u0003",
-	    "\u001d\u0003\u001d\u0005\u001d\u00e7\n\u001d\u0003\u001d\u0003\u001d",
-	    "\u0003\u001e\u0003\u001e\u0003\u001e\u0003\u001e\u0003\u001f\u0003\u001f",
-	    "\u0007\u001f\u00f1\n\u001f\f\u001f\u000e\u001f\u00f4\u000b\u001f\u0003",
-	    " \u0003 \u0003!\u0003!\u0005!\u00fa\n!\u0003\"\u0006\"\u00fd\n\"\r\"",
-	    "\u000e\"\u00fe\u0003\"\u0003\"\u0002\u0002#\u0003\u0003\u0005\u0004",
-	    "\u0007\u0005\t\u0006\u000b\u0007\r\b\u000f\t\u0011\n\u0013\u000b\u0015",
-	    "\f\u0017\r\u0019\u000e\u001b\u000f\u001d\u0010\u001f\u0011!\u0012#\u0013",
-	    "%\u0014\'\u0015)\u0016+\u0017-\u0018/\u00021\u00023\u00025\u00197\u0002",
-	    "9\u0002;\u001a=\u001b?\u0002A\u0002C\u001c\u0003\u0002\u000f\u0004\u0002",
-	    "??\u0080\u0080\u0004\u0002>>@@\u0003\u0002/0\u0004\u0002$$^^\u0004\u0002",
-	    "))^^\u000b\u0002$$))11^^ddhhppttvv\u0005\u00022;CHch\u0003\u00022;\u0003",
-	    "\u00023;\u0004\u0002GGgg\u0004\u0002--//\u0004\u0002C\\c|\u0005\u0002",
-	    "\u000b\f\u000f\u000f\"\"\u0115\u0002\u0003\u0003\u0002\u0002\u0002\u0002",
-	    "\u0005\u0003\u0002\u0002\u0002\u0002\u0007\u0003\u0002\u0002\u0002\u0002",
-	    "\t\u0003\u0002\u0002\u0002\u0002\u000b\u0003\u0002\u0002\u0002\u0002",
-	    "\r\u0003\u0002\u0002\u0002\u0002\u000f\u0003\u0002\u0002\u0002\u0002",
-	    "\u0011\u0003\u0002\u0002\u0002\u0002\u0013\u0003\u0002\u0002\u0002\u0002",
-	    "\u0015\u0003\u0002\u0002\u0002\u0002\u0017\u0003\u0002\u0002\u0002\u0002",
-	    "\u0019\u0003\u0002\u0002\u0002\u0002\u001b\u0003\u0002\u0002\u0002\u0002",
-	    "\u001d\u0003\u0002\u0002\u0002\u0002\u001f\u0003\u0002\u0002\u0002\u0002",
-	    "!\u0003\u0002\u0002\u0002\u0002#\u0003\u0002\u0002\u0002\u0002%\u0003",
-	    "\u0002\u0002\u0002\u0002\'\u0003\u0002\u0002\u0002\u0002)\u0003\u0002",
-	    "\u0002\u0002\u0002+\u0003\u0002\u0002\u0002\u0002-\u0003\u0002\u0002",
-	    "\u0002\u00025\u0003\u0002\u0002\u0002\u0002;\u0003\u0002\u0002\u0002",
-	    "\u0002=\u0003\u0002\u0002\u0002\u0002C\u0003\u0002\u0002\u0002\u0003",
-	    "E\u0003\u0002\u0002\u0002\u0005G\u0003\u0002\u0002\u0002\u0007I\u0003",
-	    "\u0002\u0002\u0002\tK\u0003\u0002\u0002\u0002\u000bM\u0003\u0002\u0002",
-	    "\u0002\rO\u0003\u0002\u0002\u0002\u000fQ\u0003\u0002\u0002\u0002\u0011",
-	    "S\u0003\u0002\u0002\u0002\u0013U\u0003\u0002\u0002\u0002\u0015W\u0003",
-	    "\u0002\u0002\u0002\u0017Y\u0003\u0002\u0002\u0002\u0019[\u0003\u0002",
-	    "\u0002\u0002\u001b]\u0003\u0002\u0002\u0002\u001d`\u0003\u0002\u0002",
-	    "\u0002\u001fi\u0003\u0002\u0002\u0002!s\u0003\u0002\u0002\u0002#{\u0003",
-	    "\u0002\u0002\u0002%\u0085\u0003\u0002\u0002\u0002\'\u0093\u0003\u0002",
-	    "\u0002\u0002)\u009e\u0003\u0002\u0002\u0002+\u00a0\u0003\u0002\u0002",
-	    "\u0002-\u00bb\u0003\u0002\u0002\u0002/\u00bd\u0003\u0002\u0002\u0002",
-	    "1\u00c2\u0003\u0002\u0002\u00023\u00c8\u0003\u0002\u0002\u00025\u00d8",
-	    "\u0003\u0002\u0002\u00027\u00e2\u0003\u0002\u0002\u00029\u00e4\u0003",
-	    "\u0002\u0002\u0002;\u00ea\u0003\u0002\u0002\u0002=\u00ee\u0003\u0002",
-	    "\u0002\u0002?\u00f5\u0003\u0002\u0002\u0002A\u00f9\u0003\u0002\u0002",
-	    "\u0002C\u00fc\u0003\u0002\u0002\u0002EF\u0007*\u0002\u0002F\u0004\u0003",
-	    "\u0002\u0002\u0002GH\u0007+\u0002\u0002H\u0006\u0003\u0002\u0002\u0002",
-	    "IJ\u0007<\u0002\u0002J\b\u0003\u0002\u0002\u0002KL\u0007\u000f\u0002",
-	    "\u0002L\n\u0003\u0002\u0002\u0002MN\u0007\f\u0002\u0002N\f\u0003\u0002",
-	    "\u0002\u0002OP\u0007,\u0002\u0002P\u000e\u0003\u0002\u0002\u0002QR\u0007",
-	    "1\u0002\u0002R\u0010\u0003\u0002\u0002\u0002ST\u0007-\u0002\u0002T\u0012",
-	    "\u0003\u0002\u0002\u0002UV\u0007/\u0002\u0002V\u0014\u0003\u0002\u0002",
-	    "\u0002WX\u0007~\u0002\u0002X\u0016\u0003\u0002\u0002\u0002YZ\u0007(",
-	    "\u0002\u0002Z\u0018\u0003\u0002\u0002\u0002[\\\u00070\u0002\u0002\\",
-	    "\u001a\u0003\u0002\u0002\u0002]^\u0007,\u0002\u0002^_\u0007,\u0002\u0002",
-	    "_\u001c\u0003\u0002\u0002\u0002`a\u0007&\u0002\u0002ab\u0007e\u0002",
-	    "\u0002bc\u0007q\u0002\u0002cd\u0007p\u0002\u0002de\u0007v\u0002\u0002",
-	    "ef\u0007g\u0002\u0002fg\u0007z\u0002\u0002gh\u0007v\u0002\u0002h\u001e",
-	    "\u0003\u0002\u0002\u0002ij\u0007&\u0002\u0002jk\u0007t\u0002\u0002k",
-	    "l\u0007g\u0002\u0002lm\u0007u\u0002\u0002mn\u0007q\u0002\u0002no\u0007",
-	    "w\u0002\u0002op\u0007t\u0002\u0002pq\u0007e\u0002\u0002qr\u0007g\u0002",
-	    "\u0002r \u0003\u0002\u0002\u0002st\u0007&\u0002\u0002tu\u0007r\u0002",
-	    "\u0002uv\u0007c\u0002\u0002vw\u0007t\u0002\u0002wx\u0007g\u0002\u0002",
-	    "xy\u0007p\u0002\u0002yz\u0007v\u0002\u0002z\"\u0003\u0002\u0002\u0002",
-	    "{|\u0007.\u0002\u0002|$\u0003\u0002\u0002\u0002}~\u0007c\u0002\u0002",
-	    "~\u007f\u0007p\u0002\u0002\u007f\u0086\u0007f\u0002\u0002\u0080\u0081",
-	    "\u0007q\u0002\u0002\u0081\u0086\u0007t\u0002\u0002\u0082\u0083\u0007",
-	    "z\u0002\u0002\u0083\u0084\u0007q\u0002\u0002\u0084\u0086\u0007t\u0002",
-	    "\u0002\u0085}\u0003\u0002\u0002\u0002\u0085\u0080\u0003\u0002\u0002",
-	    "\u0002\u0085\u0082\u0003\u0002\u0002\u0002\u0086&\u0003\u0002\u0002",
-	    "\u0002\u0087\u0094\t\u0002\u0002\u0002\u0088\u0089\u0007#\u0002\u0002",
-	    "\u0089\u0094\u0007?\u0002\u0002\u008a\u008b\u0007#\u0002\u0002\u008b",
-	    "\u0094\u0007\u0080\u0002\u0002\u008c\u0094\t\u0003\u0002\u0002\u008d",
-	    "\u008e\u0007>\u0002\u0002\u008e\u0094\u0007?\u0002\u0002\u008f\u0090",
-	    "\u0007@\u0002\u0002\u0090\u0094\u0007?\u0002\u0002\u0091\u0092\u0007",
-	    "k\u0002\u0002\u0092\u0094\u0007p\u0002\u0002\u0093\u0087\u0003\u0002",
-	    "\u0002\u0002\u0093\u0088\u0003\u0002\u0002\u0002\u0093\u008a\u0003\u0002",
-	    "\u0002\u0002\u0093\u008c\u0003\u0002\u0002\u0002\u0093\u008d\u0003\u0002",
-	    "\u0002\u0002\u0093\u008f\u0003\u0002\u0002\u0002\u0093\u0091\u0003\u0002",
-	    "\u0002\u0002\u0094(\u0003\u0002\u0002\u0002\u0095\u0096\u0007v\u0002",
-	    "\u0002\u0096\u0097\u0007t\u0002\u0002\u0097\u0098\u0007w\u0002\u0002",
-	    "\u0098\u009f\u0007g\u0002\u0002\u0099\u009a\u0007h\u0002\u0002\u009a",
-	    "\u009b\u0007c\u0002\u0002\u009b\u009c\u0007n\u0002\u0002\u009c\u009d",
-	    "\u0007u\u0002\u0002\u009d\u009f\u0007g\u0002\u0002\u009e\u0095\u0003",
-	    "\u0002\u0002\u0002\u009e\u0099\u0003\u0002\u0002\u0002\u009f*\u0003",
-	    "\u0002\u0002\u0002\u00a0\u00a1\u0007\'\u0002\u0002\u00a1\u00a6\u0005",
-	    "A!\u0002\u00a2\u00a5\u0005A!\u0002\u00a3\u00a5\t\u0004\u0002\u0002\u00a4",
-	    "\u00a2\u0003\u0002\u0002\u0002\u00a4\u00a3\u0003\u0002\u0002\u0002\u00a5",
-	    "\u00a8\u0003\u0002\u0002\u0002\u00a6\u00a4\u0003\u0002\u0002\u0002\u00a6",
-	    "\u00a7\u0003\u0002\u0002\u0002\u00a7,\u0003\u0002\u0002\u0002\u00a8",
-	    "\u00a6\u0003\u0002\u0002\u0002\u00a9\u00ae\u0007$\u0002\u0002\u00aa",
-	    "\u00ad\u0005/\u0018\u0002\u00ab\u00ad\n\u0005\u0002\u0002\u00ac\u00aa",
-	    "\u0003\u0002\u0002\u0002\u00ac\u00ab\u0003\u0002\u0002\u0002\u00ad\u00b0",
-	    "\u0003\u0002\u0002\u0002\u00ae\u00ac\u0003\u0002\u0002\u0002\u00ae\u00af",
-	    "\u0003\u0002\u0002\u0002\u00af\u00b1\u0003\u0002\u0002\u0002\u00b0\u00ae",
-	    "\u0003\u0002\u0002\u0002\u00b1\u00bc\u0007$\u0002\u0002\u00b2\u00b7",
-	    "\u0007)\u0002\u0002\u00b3\u00b6\u0005/\u0018\u0002\u00b4\u00b6\n\u0006",
-	    "\u0002\u0002\u00b5\u00b3\u0003\u0002\u0002\u0002\u00b5\u00b4\u0003\u0002",
-	    "\u0002\u0002\u00b6\u00b9\u0003\u0002\u0002\u0002\u00b7\u00b5\u0003\u0002",
-	    "\u0002\u0002\u00b7\u00b8\u0003\u0002\u0002\u0002\u00b8\u00ba\u0003\u0002",
-	    "\u0002\u0002\u00b9\u00b7\u0003\u0002\u0002\u0002\u00ba\u00bc\u0007)",
-	    "\u0002\u0002\u00bb\u00a9\u0003\u0002\u0002\u0002\u00bb\u00b2\u0003\u0002",
-	    "\u0002\u0002\u00bc.\u0003\u0002\u0002\u0002\u00bd\u00c0\u0007^\u0002",
-	    "\u0002\u00be\u00c1\t\u0007\u0002\u0002\u00bf\u00c1\u00051\u0019\u0002",
-	    "\u00c0\u00be\u0003\u0002\u0002\u0002\u00c0\u00bf\u0003\u0002\u0002\u0002",
-	    "\u00c10\u0003\u0002\u0002\u0002\u00c2\u00c3\u0007w\u0002\u0002\u00c3",
-	    "\u00c4\u00053\u001a\u0002\u00c4\u00c5\u00053\u001a\u0002\u00c5\u00c6",
-	    "\u00053\u001a\u0002\u00c6\u00c7\u00053\u001a\u0002\u00c72\u0003\u0002",
-	    "\u0002\u0002\u00c8\u00c9\t\b\u0002\u0002\u00c94\u0003\u0002\u0002\u0002",
-	    "\u00ca\u00cb\u00057\u001c\u0002\u00cb\u00cd\u00070\u0002\u0002\u00cc",
-	    "\u00ce\t\t\u0002\u0002\u00cd\u00cc\u0003\u0002\u0002\u0002\u00ce\u00cf",
-	    "\u0003\u0002\u0002\u0002\u00cf\u00cd\u0003\u0002\u0002\u0002\u00cf\u00d0",
-	    "\u0003\u0002\u0002\u0002\u00d0\u00d2\u0003\u0002\u0002\u0002\u00d1\u00d3",
-	    "\u00059\u001d\u0002\u00d2\u00d1\u0003\u0002\u0002\u0002\u00d2\u00d3",
-	    "\u0003\u0002\u0002\u0002\u00d3\u00d9\u0003\u0002\u0002\u0002\u00d4\u00d5",
-	    "\u00057\u001c\u0002\u00d5\u00d6\u00059\u001d\u0002\u00d6\u00d9\u0003",
-	    "\u0002\u0002\u0002\u00d7\u00d9\u00057\u001c\u0002\u00d8\u00ca\u0003",
-	    "\u0002\u0002\u0002\u00d8\u00d4\u0003\u0002\u0002\u0002\u00d8\u00d7\u0003",
-	    "\u0002\u0002\u0002\u00d96\u0003\u0002\u0002\u0002\u00da\u00e3\u0007",
-	    "2\u0002\u0002\u00db\u00df\t\n\u0002\u0002\u00dc\u00de\t\t\u0002\u0002",
-	    "\u00dd\u00dc\u0003\u0002\u0002\u0002\u00de\u00e1\u0003\u0002\u0002\u0002",
-	    "\u00df\u00dd\u0003\u0002\u0002\u0002\u00df\u00e0\u0003\u0002\u0002\u0002",
-	    "\u00e0\u00e3\u0003\u0002\u0002\u0002\u00e1\u00df\u0003\u0002\u0002\u0002",
-	    "\u00e2\u00da\u0003\u0002\u0002\u0002\u00e2\u00db\u0003\u0002\u0002\u0002",
-	    "\u00e38\u0003\u0002\u0002\u0002\u00e4\u00e6\t\u000b\u0002\u0002\u00e5",
-	    "\u00e7\t\f\u0002\u0002\u00e6\u00e5\u0003\u0002\u0002\u0002\u00e6\u00e7",
-	    "\u0003\u0002\u0002\u0002\u00e7\u00e8\u0003\u0002\u0002\u0002\u00e8\u00e9",
-	    "\u00057\u001c\u0002\u00e9:\u0003\u0002\u0002\u0002\u00ea\u00eb\u0007",
-	    "]\u0002\u0002\u00eb\u00ec\u0007z\u0002\u0002\u00ec\u00ed\u0007_\u0002",
-	    "\u0002\u00ed<\u0003\u0002\u0002\u0002\u00ee\u00f2\u0005? \u0002\u00ef",
-	    "\u00f1\u0005A!\u0002\u00f0\u00ef\u0003\u0002\u0002\u0002\u00f1\u00f4",
-	    "\u0003\u0002\u0002\u0002\u00f2\u00f0\u0003\u0002\u0002\u0002\u00f2\u00f3",
-	    "\u0003\u0002\u0002\u0002\u00f3>\u0003\u0002\u0002\u0002\u00f4\u00f2",
-	    "\u0003\u0002\u0002\u0002\u00f5\u00f6\t\r\u0002\u0002\u00f6@\u0003\u0002",
-	    "\u0002\u0002\u00f7\u00fa\u0005? \u0002\u00f8\u00fa\t\t\u0002\u0002\u00f9",
-	    "\u00f7\u0003\u0002\u0002\u0002\u00f9\u00f8\u0003\u0002\u0002\u0002\u00fa",
-	    "B\u0003\u0002\u0002\u0002\u00fb\u00fd\t\u000e\u0002\u0002\u00fc\u00fb",
-	    "\u0003\u0002\u0002\u0002\u00fd\u00fe\u0003\u0002\u0002\u0002\u00fe\u00fc",
-	    "\u0003\u0002\u0002\u0002\u00fe\u00ff\u0003\u0002\u0002\u0002\u00ff\u0100",
-	    "\u0003\u0002\u0002\u0002\u0100\u0101\b\"\u0002\u0002\u0101D\u0003\u0002",
-	    "\u0002\u0002\u0017\u0002\u0085\u0093\u009e\u00a4\u00a6\u00ac\u00ae\u00b5",
-	    "\u00b7\u00bb\u00c0\u00cf\u00d2\u00d8\u00df\u00e2\u00e6\u00f2\u00f9\u00fe",
-	    "\u0003\b\u0002\u0002"].join("");
+	    "\t\u001e\u0004\u001f\t\u001f\u0004 \t \u0004!\t!\u0004\"\t\"\u0004#",
+	    "\t#\u0004$\t$\u0004%\t%\u0004&\t&\u0004\'\t\'\u0004(\t(\u0004)\t)\u0004",
+	    "*\t*\u0004+\t+\u0004,\t,\u0004-\t-\u0004.\t.\u0004/\t/\u00040\t0\u0004",
+	    "1\t1\u00042\t2\u0003\u0002\u0003\u0002\u0003\u0003\u0003\u0003\u0003",
+	    "\u0004\u0003\u0004\u0003\u0005\u0003\u0005\u0003\u0006\u0003\u0006\u0003",
+	    "\u0007\u0003\u0007\u0003\b\u0003\b\u0003\t\u0003\t\u0003\t\u0003\t\u0003",
+	    "\n\u0003\n\u0003\n\u0003\n\u0003\u000b\u0003\u000b\u0003\f\u0003\f\u0003",
+	    "\r\u0003\r\u0003\u000e\u0003\u000e\u0003\u000f\u0003\u000f\u0003\u0010",
+	    "\u0003\u0010\u0003\u0011\u0003\u0011\u0003\u0011\u0003\u0012\u0003\u0012",
+	    "\u0003\u0012\u0003\u0013\u0003\u0013\u0003\u0013\u0003\u0014\u0003\u0014",
+	    "\u0003\u0014\u0003\u0015\u0003\u0015\u0003\u0016\u0003\u0016\u0003\u0017",
+	    "\u0003\u0017\u0003\u0017\u0003\u0018\u0003\u0018\u0003\u0018\u0003\u0019",
+	    "\u0003\u0019\u0003\u0019\u0003\u001a\u0003\u001a\u0003\u001a\u0003\u001a",
+	    "\u0003\u001b\u0003\u001b\u0003\u001b\u0003\u001b\u0003\u001c\u0003\u001c",
+	    "\u0003\u001c\u0003\u001d\u0003\u001d\u0003\u001d\u0003\u001d\u0003\u001d",
+	    "\u0003\u001d\u0003\u001d\u0003\u001d\u0003\u001e\u0003\u001e\u0003\u001f",
+	    "\u0003\u001f\u0003\u001f\u0003 \u0003 \u0003 \u0003 \u0003 \u0003 \u0003",
+	    " \u0003 \u0003 \u0003!\u0003!\u0003!\u0003!\u0003!\u0003!\u0003!\u0003",
+	    "!\u0003!\u0003!\u0003\"\u0003\"\u0003\"\u0003\"\u0003\"\u0003\"\u0003",
+	    "\"\u0003\"\u0003#\u0003#\u0003#\u0003#\u0003#\u0003#\u0003$\u0003$\u0003",
+	    "%\u0003%\u0003%\u0003%\u0003%\u0003%\u0003%\u0003%\u0003%\u0005%\u00e5",
+	    "\n%\u0003&\u0003&\u0003&\u0003&\u0007&\u00eb\n&\f&\u000e&\u00ee\u000b",
+	    "&\u0003\'\u0003\'\u0003\'\u0007\'\u00f3\n\'\f\'\u000e\'\u00f6\u000b",
+	    "\'\u0003\'\u0003\'\u0003\'\u0003\'\u0007\'\u00fc\n\'\f\'\u000e\'\u00ff",
+	    "\u000b\'\u0003\'\u0005\'\u0102\n\'\u0003(\u0003(\u0003(\u0005(\u0107",
+	    "\n(\u0003)\u0003)\u0003)\u0003)\u0003)\u0003)\u0003*\u0003*\u0003+\u0003",
+	    "+\u0003+\u0006+\u0114\n+\r+\u000e+\u0115\u0003+\u0005+\u0119\n+\u0003",
+	    "+\u0003+\u0003+\u0003+\u0005+\u011f\n+\u0003,\u0003,\u0003,\u0007,\u0124",
+	    "\n,\f,\u000e,\u0127\u000b,\u0005,\u0129\n,\u0003-\u0003-\u0005-\u012d",
+	    "\n-\u0003-\u0003-\u0003.\u0003.\u0003.\u0003.\u0003/\u0003/\u0007/\u0137",
+	    "\n/\f/\u000e/\u013a\u000b/\u00030\u00030\u00031\u00031\u00051\u0140",
+	    "\n1\u00032\u00062\u0143\n2\r2\u000e2\u0144\u00032\u00032\u0002\u0002",
+	    "3\u0003\u0003\u0005\u0004\u0007\u0005\t\u0006\u000b\u0007\r\b\u000f",
+	    "\t\u0011\n\u0013\u000b\u0015\f\u0017\r\u0019\u000e\u001b\u000f\u001d",
+	    "\u0010\u001f\u0011!\u0012#\u0013%\u0014\'\u0015)\u0016+\u0017-\u0018",
+	    "/\u00191\u001a3\u001b5\u001c7\u001d9\u001e;\u001f= ?!A\"C#E$G%I&K\'",
+	    "M(O\u0002Q\u0002S\u0002U)W\u0002Y\u0002[*]+_\u0002a\u0002c,\u0003\u0002",
+	    "\r\u0003\u0002/0\u0004\u0002$$^^\u0004\u0002))^^\u000b\u0002$$))11^",
+	    "^ddhhppttvv\u0005\u00022;CHch\u0003\u00022;\u0003\u00023;\u0004\u0002",
+	    "GGgg\u0004\u0002--//\u0004\u0002C\\c|\u0005\u0002\u000b\f\u000f\u000f",
+	    "\"\"\u0153\u0002\u0003\u0003\u0002\u0002\u0002\u0002\u0005\u0003\u0002",
+	    "\u0002\u0002\u0002\u0007\u0003\u0002\u0002\u0002\u0002\t\u0003\u0002",
+	    "\u0002\u0002\u0002\u000b\u0003\u0002\u0002\u0002\u0002\r\u0003\u0002",
+	    "\u0002\u0002\u0002\u000f\u0003\u0002\u0002\u0002\u0002\u0011\u0003\u0002",
+	    "\u0002\u0002\u0002\u0013\u0003\u0002\u0002\u0002\u0002\u0015\u0003\u0002",
+	    "\u0002\u0002\u0002\u0017\u0003\u0002\u0002\u0002\u0002\u0019\u0003\u0002",
+	    "\u0002\u0002\u0002\u001b\u0003\u0002\u0002\u0002\u0002\u001d\u0003\u0002",
+	    "\u0002\u0002\u0002\u001f\u0003\u0002\u0002\u0002\u0002!\u0003\u0002",
+	    "\u0002\u0002\u0002#\u0003\u0002\u0002\u0002\u0002%\u0003\u0002\u0002",
+	    "\u0002\u0002\'\u0003\u0002\u0002\u0002\u0002)\u0003\u0002\u0002\u0002",
+	    "\u0002+\u0003\u0002\u0002\u0002\u0002-\u0003\u0002\u0002\u0002\u0002",
+	    "/\u0003\u0002\u0002\u0002\u00021\u0003\u0002\u0002\u0002\u00023\u0003",
+	    "\u0002\u0002\u0002\u00025\u0003\u0002\u0002\u0002\u00027\u0003\u0002",
+	    "\u0002\u0002\u00029\u0003\u0002\u0002\u0002\u0002;\u0003\u0002\u0002",
+	    "\u0002\u0002=\u0003\u0002\u0002\u0002\u0002?\u0003\u0002\u0002\u0002",
+	    "\u0002A\u0003\u0002\u0002\u0002\u0002C\u0003\u0002\u0002\u0002\u0002",
+	    "E\u0003\u0002\u0002\u0002\u0002G\u0003\u0002\u0002\u0002\u0002I\u0003",
+	    "\u0002\u0002\u0002\u0002K\u0003\u0002\u0002\u0002\u0002M\u0003\u0002",
+	    "\u0002\u0002\u0002U\u0003\u0002\u0002\u0002\u0002[\u0003\u0002\u0002",
+	    "\u0002\u0002]\u0003\u0002\u0002\u0002\u0002c\u0003\u0002\u0002\u0002",
+	    "\u0003e\u0003\u0002\u0002\u0002\u0005g\u0003\u0002\u0002\u0002\u0007",
+	    "i\u0003\u0002\u0002\u0002\tk\u0003\u0002\u0002\u0002\u000bm\u0003\u0002",
+	    "\u0002\u0002\ro\u0003\u0002\u0002\u0002\u000fq\u0003\u0002\u0002\u0002",
+	    "\u0011s\u0003\u0002\u0002\u0002\u0013w\u0003\u0002\u0002\u0002\u0015",
+	    "{\u0003\u0002\u0002\u0002\u0017}\u0003\u0002\u0002\u0002\u0019\u007f",
+	    "\u0003\u0002\u0002\u0002\u001b\u0081\u0003\u0002\u0002\u0002\u001d\u0083",
+	    "\u0003\u0002\u0002\u0002\u001f\u0085\u0003\u0002\u0002\u0002!\u0087",
+	    "\u0003\u0002\u0002\u0002#\u008a\u0003\u0002\u0002\u0002%\u008d\u0003",
+	    "\u0002\u0002\u0002\'\u0090\u0003\u0002\u0002\u0002)\u0093\u0003\u0002",
+	    "\u0002\u0002+\u0095\u0003\u0002\u0002\u0002-\u0097\u0003\u0002\u0002",
+	    "\u0002/\u009a\u0003\u0002\u0002\u00021\u009d\u0003\u0002\u0002\u0002",
+	    "3\u00a0\u0003\u0002\u0002\u00025\u00a4\u0003\u0002\u0002\u00027\u00a8",
+	    "\u0003\u0002\u0002\u00029\u00ab\u0003\u0002\u0002\u0002;\u00b3\u0003",
+	    "\u0002\u0002\u0002=\u00b5\u0003\u0002\u0002\u0002?\u00b8\u0003\u0002",
+	    "\u0002\u0002A\u00c1\u0003\u0002\u0002\u0002C\u00cb\u0003\u0002\u0002",
+	    "\u0002E\u00d3\u0003\u0002\u0002\u0002G\u00d9\u0003\u0002\u0002\u0002",
+	    "I\u00e4\u0003\u0002\u0002\u0002K\u00e6\u0003\u0002\u0002\u0002M\u0101",
+	    "\u0003\u0002\u0002\u0002O\u0103\u0003\u0002\u0002\u0002Q\u0108\u0003",
+	    "\u0002\u0002\u0002S\u010e\u0003\u0002\u0002\u0002U\u011e\u0003\u0002",
+	    "\u0002\u0002W\u0128\u0003\u0002\u0002\u0002Y\u012a\u0003\u0002\u0002",
+	    "\u0002[\u0130\u0003\u0002\u0002\u0002]\u0134\u0003\u0002\u0002\u0002",
+	    "_\u013b\u0003\u0002\u0002\u0002a\u013f\u0003\u0002\u0002\u0002c\u0142",
+	    "\u0003\u0002\u0002\u0002ef\u0007*\u0002\u0002f\u0004\u0003\u0002\u0002",
+	    "\u0002gh\u0007+\u0002\u0002h\u0006\u0003\u0002\u0002\u0002ij\u0007<",
+	    "\u0002\u0002j\b\u0003\u0002\u0002\u0002kl\u0007\u000f\u0002\u0002l\n",
+	    "\u0003\u0002\u0002\u0002mn\u0007\f\u0002\u0002n\f\u0003\u0002\u0002",
+	    "\u0002op\u0007,\u0002\u0002p\u000e\u0003\u0002\u0002\u0002qr\u00071",
+	    "\u0002\u0002r\u0010\u0003\u0002\u0002\u0002st\u0007f\u0002\u0002tu\u0007",
+	    "k\u0002\u0002uv\u0007x\u0002\u0002v\u0012\u0003\u0002\u0002\u0002wx",
+	    "\u0007o\u0002\u0002xy\u0007q\u0002\u0002yz\u0007f\u0002\u0002z\u0014",
+	    "\u0003\u0002\u0002\u0002{|\u0007-\u0002\u0002|\u0016\u0003\u0002\u0002",
+	    "\u0002}~\u0007/\u0002\u0002~\u0018\u0003\u0002\u0002\u0002\u007f\u0080",
+	    "\u0007~\u0002\u0002\u0080\u001a\u0003\u0002\u0002\u0002\u0081\u0082",
+	    "\u0007(\u0002\u0002\u0082\u001c\u0003\u0002\u0002\u0002\u0083\u0084",
+	    "\u0007@\u0002\u0002\u0084\u001e\u0003\u0002\u0002\u0002\u0085\u0086",
+	    "\u0007>\u0002\u0002\u0086 \u0003\u0002\u0002\u0002\u0087\u0088\u0007",
+	    ">\u0002\u0002\u0088\u0089\u0007?\u0002\u0002\u0089\"\u0003\u0002\u0002",
+	    "\u0002\u008a\u008b\u0007@\u0002\u0002\u008b\u008c\u0007?\u0002\u0002",
+	    "\u008c$\u0003\u0002\u0002\u0002\u008d\u008e\u0007k\u0002\u0002\u008e",
+	    "\u008f\u0007u\u0002\u0002\u008f&\u0003\u0002\u0002\u0002\u0090\u0091",
+	    "\u0007c\u0002\u0002\u0091\u0092\u0007u\u0002\u0002\u0092(\u0003\u0002",
+	    "\u0002\u0002\u0093\u0094\u0007?\u0002\u0002\u0094*\u0003\u0002\u0002",
+	    "\u0002\u0095\u0096\u0007\u0080\u0002\u0002\u0096,\u0003\u0002\u0002",
+	    "\u0002\u0097\u0098\u0007#\u0002\u0002\u0098\u0099\u0007?\u0002\u0002",
+	    "\u0099.\u0003\u0002\u0002\u0002\u009a\u009b\u0007#\u0002\u0002\u009b",
+	    "\u009c\u0007\u0080\u0002\u0002\u009c0\u0003\u0002\u0002\u0002\u009d",
+	    "\u009e\u0007k\u0002\u0002\u009e\u009f\u0007p\u0002\u0002\u009f2\u0003",
+	    "\u0002\u0002\u0002\u00a0\u00a1\u0007c\u0002\u0002\u00a1\u00a2\u0007",
+	    "p\u0002\u0002\u00a2\u00a3\u0007f\u0002\u0002\u00a34\u0003\u0002\u0002",
+	    "\u0002\u00a4\u00a5\u0007z\u0002\u0002\u00a5\u00a6\u0007q\u0002\u0002",
+	    "\u00a6\u00a7\u0007t\u0002\u0002\u00a76\u0003\u0002\u0002\u0002\u00a8",
+	    "\u00a9\u0007q\u0002\u0002\u00a9\u00aa\u0007t\u0002\u0002\u00aa8\u0003",
+	    "\u0002\u0002\u0002\u00ab\u00ac\u0007k\u0002\u0002\u00ac\u00ad\u0007",
+	    "o\u0002\u0002\u00ad\u00ae\u0007r\u0002\u0002\u00ae\u00af\u0007n\u0002",
+	    "\u0002\u00af\u00b0\u0007k\u0002\u0002\u00b0\u00b1\u0007g\u0002\u0002",
+	    "\u00b1\u00b2\u0007u\u0002\u0002\u00b2:\u0003\u0002\u0002\u0002\u00b3",
+	    "\u00b4\u00070\u0002\u0002\u00b4<\u0003\u0002\u0002\u0002\u00b5\u00b6",
+	    "\u0007,\u0002\u0002\u00b6\u00b7\u0007,\u0002\u0002\u00b7>\u0003\u0002",
+	    "\u0002\u0002\u00b8\u00b9\u0007&\u0002\u0002\u00b9\u00ba\u0007e\u0002",
+	    "\u0002\u00ba\u00bb\u0007q\u0002\u0002\u00bb\u00bc\u0007p\u0002\u0002",
+	    "\u00bc\u00bd\u0007v\u0002\u0002\u00bd\u00be\u0007g\u0002\u0002\u00be",
+	    "\u00bf\u0007z\u0002\u0002\u00bf\u00c0\u0007v\u0002\u0002\u00c0@\u0003",
+	    "\u0002\u0002\u0002\u00c1\u00c2\u0007&\u0002\u0002\u00c2\u00c3\u0007",
+	    "t\u0002\u0002\u00c3\u00c4\u0007g\u0002\u0002\u00c4\u00c5\u0007u\u0002",
+	    "\u0002\u00c5\u00c6\u0007q\u0002\u0002\u00c6\u00c7\u0007w\u0002\u0002",
+	    "\u00c7\u00c8\u0007t\u0002\u0002\u00c8\u00c9\u0007e\u0002\u0002\u00c9",
+	    "\u00ca\u0007g\u0002\u0002\u00caB\u0003\u0002\u0002\u0002\u00cb\u00cc",
+	    "\u0007&\u0002\u0002\u00cc\u00cd\u0007r\u0002\u0002\u00cd\u00ce\u0007",
+	    "c\u0002\u0002\u00ce\u00cf\u0007t\u0002\u0002\u00cf\u00d0\u0007g\u0002",
+	    "\u0002\u00d0\u00d1\u0007p\u0002\u0002\u00d1\u00d2\u0007v\u0002\u0002",
+	    "\u00d2D\u0003\u0002\u0002\u0002\u00d3\u00d4\u0007&\u0002\u0002\u00d4",
+	    "\u00d5\u0007v\u0002\u0002\u00d5\u00d6\u0007j\u0002\u0002\u00d6\u00d7",
+	    "\u0007k\u0002\u0002\u00d7\u00d8\u0007u\u0002\u0002\u00d8F\u0003\u0002",
+	    "\u0002\u0002\u00d9\u00da\u0007.\u0002\u0002\u00daH\u0003\u0002\u0002",
+	    "\u0002\u00db\u00dc\u0007v\u0002\u0002\u00dc\u00dd\u0007t\u0002\u0002",
+	    "\u00dd\u00de\u0007w\u0002\u0002\u00de\u00e5\u0007g\u0002\u0002\u00df",
+	    "\u00e0\u0007h\u0002\u0002\u00e0\u00e1\u0007c\u0002\u0002\u00e1\u00e2",
+	    "\u0007n\u0002\u0002\u00e2\u00e3\u0007u\u0002\u0002\u00e3\u00e5\u0007",
+	    "g\u0002\u0002\u00e4\u00db\u0003\u0002\u0002\u0002\u00e4\u00df\u0003",
+	    "\u0002\u0002\u0002\u00e5J\u0003\u0002\u0002\u0002\u00e6\u00e7\u0007",
+	    "\'\u0002\u0002\u00e7\u00ec\u0005a1\u0002\u00e8\u00eb\u0005a1\u0002\u00e9",
+	    "\u00eb\t\u0002\u0002\u0002\u00ea\u00e8\u0003\u0002\u0002\u0002\u00ea",
+	    "\u00e9\u0003\u0002\u0002\u0002\u00eb\u00ee\u0003\u0002\u0002\u0002\u00ec",
+	    "\u00ea\u0003\u0002\u0002\u0002\u00ec\u00ed\u0003\u0002\u0002\u0002\u00ed",
+	    "L\u0003\u0002\u0002\u0002\u00ee\u00ec\u0003\u0002\u0002\u0002\u00ef",
+	    "\u00f4\u0007$\u0002\u0002\u00f0\u00f3\u0005O(\u0002\u00f1\u00f3\n\u0003",
+	    "\u0002\u0002\u00f2\u00f0\u0003\u0002\u0002\u0002\u00f2\u00f1\u0003\u0002",
+	    "\u0002\u0002\u00f3\u00f6\u0003\u0002\u0002\u0002\u00f4\u00f2\u0003\u0002",
+	    "\u0002\u0002\u00f4\u00f5\u0003\u0002\u0002\u0002\u00f5\u00f7\u0003\u0002",
+	    "\u0002\u0002\u00f6\u00f4\u0003\u0002\u0002\u0002\u00f7\u0102\u0007$",
+	    "\u0002\u0002\u00f8\u00fd\u0007)\u0002\u0002\u00f9\u00fc\u0005O(\u0002",
+	    "\u00fa\u00fc\n\u0004\u0002\u0002\u00fb\u00f9\u0003\u0002\u0002\u0002",
+	    "\u00fb\u00fa\u0003\u0002\u0002\u0002\u00fc\u00ff\u0003\u0002\u0002\u0002",
+	    "\u00fd\u00fb\u0003\u0002\u0002\u0002\u00fd\u00fe\u0003\u0002\u0002\u0002",
+	    "\u00fe\u0100\u0003\u0002\u0002\u0002\u00ff\u00fd\u0003\u0002\u0002\u0002",
+	    "\u0100\u0102\u0007)\u0002\u0002\u0101\u00ef\u0003\u0002\u0002\u0002",
+	    "\u0101\u00f8\u0003\u0002\u0002\u0002\u0102N\u0003\u0002\u0002\u0002",
+	    "\u0103\u0106\u0007^\u0002\u0002\u0104\u0107\t\u0005\u0002\u0002\u0105",
+	    "\u0107\u0005Q)\u0002\u0106\u0104\u0003\u0002\u0002\u0002\u0106\u0105",
+	    "\u0003\u0002\u0002\u0002\u0107P\u0003\u0002\u0002\u0002\u0108\u0109",
+	    "\u0007w\u0002\u0002\u0109\u010a\u0005S*\u0002\u010a\u010b\u0005S*\u0002",
+	    "\u010b\u010c\u0005S*\u0002\u010c\u010d\u0005S*\u0002\u010dR\u0003\u0002",
+	    "\u0002\u0002\u010e\u010f\t\u0006\u0002\u0002\u010fT\u0003\u0002\u0002",
+	    "\u0002\u0110\u0111\u0005W,\u0002\u0111\u0113\u00070\u0002\u0002\u0112",
+	    "\u0114\t\u0007\u0002\u0002\u0113\u0112\u0003\u0002\u0002\u0002\u0114",
+	    "\u0115\u0003\u0002\u0002\u0002\u0115\u0113\u0003\u0002\u0002\u0002\u0115",
+	    "\u0116\u0003\u0002\u0002\u0002\u0116\u0118\u0003\u0002\u0002\u0002\u0117",
+	    "\u0119\u0005Y-\u0002\u0118\u0117\u0003\u0002\u0002\u0002\u0118\u0119",
+	    "\u0003\u0002\u0002\u0002\u0119\u011f\u0003\u0002\u0002\u0002\u011a\u011b",
+	    "\u0005W,\u0002\u011b\u011c\u0005Y-\u0002\u011c\u011f\u0003\u0002\u0002",
+	    "\u0002\u011d\u011f\u0005W,\u0002\u011e\u0110\u0003\u0002\u0002\u0002",
+	    "\u011e\u011a\u0003\u0002\u0002\u0002\u011e\u011d\u0003\u0002\u0002\u0002",
+	    "\u011fV\u0003\u0002\u0002\u0002\u0120\u0129\u00072\u0002\u0002\u0121",
+	    "\u0125\t\b\u0002\u0002\u0122\u0124\t\u0007\u0002\u0002\u0123\u0122\u0003",
+	    "\u0002\u0002\u0002\u0124\u0127\u0003\u0002\u0002\u0002\u0125\u0123\u0003",
+	    "\u0002\u0002\u0002\u0125\u0126\u0003\u0002\u0002\u0002\u0126\u0129\u0003",
+	    "\u0002\u0002\u0002\u0127\u0125\u0003\u0002\u0002\u0002\u0128\u0120\u0003",
+	    "\u0002\u0002\u0002\u0128\u0121\u0003\u0002\u0002\u0002\u0129X\u0003",
+	    "\u0002\u0002\u0002\u012a\u012c\t\t\u0002\u0002\u012b\u012d\t\n\u0002",
+	    "\u0002\u012c\u012b\u0003\u0002\u0002\u0002\u012c\u012d\u0003\u0002\u0002",
+	    "\u0002\u012d\u012e\u0003\u0002\u0002\u0002\u012e\u012f\u0005W,\u0002",
+	    "\u012fZ\u0003\u0002\u0002\u0002\u0130\u0131\u0007]\u0002\u0002\u0131",
+	    "\u0132\u0007z\u0002\u0002\u0132\u0133\u0007_\u0002\u0002\u0133\\\u0003",
+	    "\u0002\u0002\u0002\u0134\u0138\u0005_0\u0002\u0135\u0137\u0005a1\u0002",
+	    "\u0136\u0135\u0003\u0002\u0002\u0002\u0137\u013a\u0003\u0002\u0002\u0002",
+	    "\u0138\u0136\u0003\u0002\u0002\u0002\u0138\u0139\u0003\u0002\u0002\u0002",
+	    "\u0139^\u0003\u0002\u0002\u0002\u013a\u0138\u0003\u0002\u0002\u0002",
+	    "\u013b\u013c\t\u000b\u0002\u0002\u013c`\u0003\u0002\u0002\u0002\u013d",
+	    "\u0140\u0005_0\u0002\u013e\u0140\t\u0007\u0002\u0002\u013f\u013d\u0003",
+	    "\u0002\u0002\u0002\u013f\u013e\u0003\u0002\u0002\u0002\u0140b\u0003",
+	    "\u0002\u0002\u0002\u0141\u0143\t\f\u0002\u0002\u0142\u0141\u0003\u0002",
+	    "\u0002\u0002\u0143\u0144\u0003\u0002\u0002\u0002\u0144\u0142\u0003\u0002",
+	    "\u0002\u0002\u0144\u0145\u0003\u0002\u0002\u0002\u0145\u0146\u0003\u0002",
+	    "\u0002\u0002\u0146\u0147\b2\u0002\u0002\u0147d\u0003\u0002\u0002\u0002",
+	    "\u0015\u0002\u00e4\u00ea\u00ec\u00f2\u00f4\u00fb\u00fd\u0101\u0106\u0115",
+	    "\u0118\u011e\u0125\u0128\u012c\u0138\u013f\u0144\u0003\b\u0002\u0002"].join("");
 
 
 	var atn = new antlr4.atn.ATNDeserializer().deserialize(serializedATN);
@@ -13157,38 +13453,62 @@ return /******/ (function(modules) { // webpackBootstrap
 	fhirpathLexer.T__14 = 15;
 	fhirpathLexer.T__15 = 16;
 	fhirpathLexer.T__16 = 17;
-	fhirpathLexer.LOGIC = 18;
-	fhirpathLexer.COMP = 19;
-	fhirpathLexer.BOOL = 20;
-	fhirpathLexer.CONST = 21;
-	fhirpathLexer.STRING = 22;
-	fhirpathLexer.NUMBER = 23;
-	fhirpathLexer.CHOICE = 24;
-	fhirpathLexer.ID = 25;
-	fhirpathLexer.WS = 26;
+	fhirpathLexer.T__17 = 18;
+	fhirpathLexer.T__18 = 19;
+	fhirpathLexer.T__19 = 20;
+	fhirpathLexer.T__20 = 21;
+	fhirpathLexer.T__21 = 22;
+	fhirpathLexer.T__22 = 23;
+	fhirpathLexer.T__23 = 24;
+	fhirpathLexer.T__24 = 25;
+	fhirpathLexer.T__25 = 26;
+	fhirpathLexer.T__26 = 27;
+	fhirpathLexer.T__27 = 28;
+	fhirpathLexer.T__28 = 29;
+	fhirpathLexer.T__29 = 30;
+	fhirpathLexer.T__30 = 31;
+	fhirpathLexer.T__31 = 32;
+	fhirpathLexer.T__32 = 33;
+	fhirpathLexer.T__33 = 34;
+	fhirpathLexer.T__34 = 35;
+	fhirpathLexer.BOOL = 36;
+	fhirpathLexer.CONST = 37;
+	fhirpathLexer.STRING = 38;
+	fhirpathLexer.NUMBER = 39;
+	fhirpathLexer.CHOICE = 40;
+	fhirpathLexer.ID = 41;
+	fhirpathLexer.WS = 42;
 
 
 	fhirpathLexer.modeNames = [ "DEFAULT_MODE" ];
 
-	fhirpathLexer.literalNames = [ 'null', "'('", "')'", "':'", "'\r'", "'\n'", 
-	                               "'*'", "'/'", "'+'", "'-'", "'|'", "'&'", 
+	fhirpathLexer.literalNames = [ null, "'('", "')'", "':'", "'\r'", "'\n'", 
+	                               "'*'", "'/'", "'div'", "'mod'", "'+'", "'-'", 
+	                               "'|'", "'&'", "'>'", "'<'", "'<='", "'>='", 
+	                               "'is'", "'as'", "'='", "'~'", "'!='", "'!~'", 
+	                               "'in'", "'and'", "'xor'", "'or'", "'implies'", 
 	                               "'.'", "'**'", "'$context'", "'$resource'", 
-	                               "'$parent'", "','", 'null', 'null', 'null', 
-	                               'null', 'null', 'null', "'[x]'" ];
+	                               "'$parent'", "'$this'", "','", null, null, 
+	                               null, null, "'[x]'" ];
 
-	fhirpathLexer.symbolicNames = [ 'null', 'null', 'null', 'null', 'null', 
-	                                'null', 'null', 'null', 'null', 'null', 
-	                                'null', 'null', 'null', 'null', 'null', 
-	                                'null', 'null', 'null', "LOGIC", "COMP", 
-	                                "BOOL", "CONST", "STRING", "NUMBER", "CHOICE", 
-	                                "ID", "WS" ];
+	fhirpathLexer.symbolicNames = [ null, null, null, null, null, null, null, 
+	                                null, null, null, null, null, null, null, 
+	                                null, null, null, null, null, null, null, 
+	                                null, null, null, null, null, null, null, 
+	                                null, null, null, null, null, null, null, 
+	                                null, "BOOL", "CONST", "STRING", "NUMBER", 
+	                                "CHOICE", "ID", "WS" ];
 
 	fhirpathLexer.ruleNames = [ "T__0", "T__1", "T__2", "T__3", "T__4", "T__5", 
 	                            "T__6", "T__7", "T__8", "T__9", "T__10", "T__11", 
 	                            "T__12", "T__13", "T__14", "T__15", "T__16", 
-	                            "LOGIC", "COMP", "BOOL", "CONST", "STRING", 
-	                            "ESC", "UNICODE", "HEX", "NUMBER", "INT", "EXP", 
-	                            "CHOICE", "ID", "ALPHA", "ALPHANUM", "WS" ];
+	                            "T__17", "T__18", "T__19", "T__20", "T__21", 
+	                            "T__22", "T__23", "T__24", "T__25", "T__26", 
+	                            "T__27", "T__28", "T__29", "T__30", "T__31", 
+	                            "T__32", "T__33", "T__34", "BOOL", "CONST", 
+	                            "STRING", "ESC", "UNICODE", "HEX", "NUMBER", 
+	                            "INT", "EXP", "CHOICE", "ID", "ALPHA", "ALPHANUM", 
+	                            "WS" ];
 
 	fhirpathLexer.grammarFileName = "fhirpath.g4";
 
@@ -13202,112 +13522,120 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 48 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated from fhirpath.g4 by ANTLR 4.5.1
+	// Generated from fhirpath.g4 by ANTLR 4.5.2
 	// jshint ignore: start
 	var antlr4 = __webpack_require__(1);
 	var fhirpathListener = __webpack_require__(49).fhirpathListener;
 	var grammarFileName = "fhirpath.g4";
 
 	var serializedATN = ["\u0003\u0430\ud6d1\u8206\uad2d\u4417\uaef1\u8d80\uaadd",
-	    "\u0003\u001c\u00a6\u0004\u0002\t\u0002\u0004\u0003\t\u0003\u0004\u0004",
-	    "\t\u0004\u0004\u0005\t\u0005\u0004\u0006\t\u0006\u0004\u0007\t\u0007",
-	    "\u0004\b\t\b\u0004\t\t\t\u0004\n\t\n\u0004\u000b\t\u000b\u0004\f\t\f",
-	    "\u0003\u0002\u0003\u0002\u0007\u0002\u001b\n\u0002\f\u0002\u000e\u0002",
-	    "\u001e\u000b\u0002\u0003\u0003\u0003\u0003\u0003\u0003\u0003\u0003\u0003",
-	    "\u0003\u0003\u0003\u0003\u0003\u0003\u0003\u0005\u0003(\n\u0003\u0003",
-	    "\u0003\u0003\u0003\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003",
-	    "\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003",
-	    "\u0004\u0003\u0004\u0005\u00048\n\u0004\u0003\u0004\u0003\u0004\u0003",
-	    "\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003",
-	    "\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003",
-	    "\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003",
-	    "\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0007\u0004S",
-	    "\n\u0004\f\u0004\u000e\u0004V\u000b\u0004\u0003\u0005\u0003\u0005\u0003",
-	    "\u0005\u0003\u0005\u0003\u0005\u0003\u0005\u0003\u0005\u0007\u0005_",
-	    "\n\u0005\f\u0005\u000e\u0005b\u000b\u0005\u0003\u0005\u0003\u0005\u0003",
-	    "\u0006\u0003\u0006\u0005\u0006h\n\u0006\u0003\u0006\u0003\u0006\u0003",
-	    "\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003",
-	    "\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0005\u0006w",
-	    "\n\u0006\u0003\u0007\u0003\u0007\u0005\u0007{\n\u0007\u0003\b\u0003",
-	    "\b\u0003\t\u0003\t\u0003\n\u0003\n\u0003\n\u0003\n\u0005\n\u0085\n\n",
-	    "\u0003\n\u0003\n\u0003\n\u0003\n\u0003\u000b\u0003\u000b\u0003\u000b",
-	    "\u0003\u000b\u0003\u000b\u0003\u000b\u0003\u000b\u0007\u000b\u0092\n",
-	    "\u000b\f\u000b\u000e\u000b\u0095\u000b\u000b\u0003\u000b\u0003\u000b",
-	    "\u0003\f\u0003\f\u0003\f\u0005\f\u009c\n\f\u0003\f\u0003\f\u0003\f\u0003",
-	    "\f\u0003\f\u0003\f\u0005\f\u00a4\n\f\u0003\f\u0002\u0003\u0006\r\u0002",
-	    "\u0004\u0006\b\n\f\u000e\u0010\u0012\u0014\u0016\u0002\u0006\u0003\u0002",
-	    "\b\t\u0003\u0002\n\u000b\u0003\u0002\f\r\u0004\u0002\b\b\u000f\u0012",
-	    "\u00af\u0002\u0018\u0003\u0002\u0002\u0002\u0004\u001f\u0003\u0002\u0002",
-	    "\u0002\u00067\u0003\u0002\u0002\u0002\bW\u0003\u0002\u0002\u0002\nv",
-	    "\u0003\u0002\u0002\u0002\fx\u0003\u0002\u0002\u0002\u000e|\u0003\u0002",
-	    "\u0002\u0002\u0010~\u0003\u0002\u0002\u0002\u0012\u0080\u0003\u0002",
-	    "\u0002\u0002\u0014\u008a\u0003\u0002\u0002\u0002\u0016\u00a3\u0003\u0002",
-	    "\u0002\u0002\u0018\u001c\u0005\u0004\u0003\u0002\u0019\u001b\u0005\u0004",
-	    "\u0003\u0002\u001a\u0019\u0003\u0002\u0002\u0002\u001b\u001e\u0003\u0002",
-	    "\u0002\u0002\u001c\u001a\u0003\u0002\u0002\u0002\u001c\u001d\u0003\u0002",
-	    "\u0002\u0002\u001d\u0003\u0003\u0002\u0002\u0002\u001e\u001c\u0003\u0002",
-	    "\u0002\u0002\u001f \u0007\u001b\u0002\u0002 !\u0007\u0003\u0002\u0002",
-	    "!\"\u0005\b\u0005\u0002\"#\u0007\u0004\u0002\u0002#$\u0003\u0002\u0002",
-	    "\u0002$%\u0007\u0005\u0002\u0002%\'\u0005\u0006\u0004\u0002&(\u0007",
-	    "\u0006\u0002\u0002\'&\u0003\u0002\u0002\u0002\'(\u0003\u0002\u0002\u0002",
-	    "()\u0003\u0002\u0002\u0002)*\u0007\u0007\u0002\u0002*\u0005\u0003\u0002",
+	    "\u0003,\u00b0\u0004\u0002\t\u0002\u0004\u0003\t\u0003\u0004\u0004\t",
+	    "\u0004\u0004\u0005\t\u0005\u0004\u0006\t\u0006\u0004\u0007\t\u0007\u0004",
+	    "\b\t\b\u0004\t\t\t\u0004\n\t\n\u0004\u000b\t\u000b\u0004\f\t\f\u0003",
+	    "\u0002\u0003\u0002\u0007\u0002\u001b\n\u0002\f\u0002\u000e\u0002\u001e",
+	    "\u000b\u0002\u0003\u0003\u0003\u0003\u0003\u0003\u0003\u0003\u0003\u0003",
+	    "\u0003\u0003\u0003\u0003\u0003\u0003\u0005\u0003(\n\u0003\u0003\u0003",
+	    "\u0003\u0003\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0005\u00048\n\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004\u0003\u0004",
+	    "\u0003\u0004\u0003\u0004\u0007\u0004]\n\u0004\f\u0004\u000e\u0004`\u000b",
+	    "\u0004\u0003\u0005\u0003\u0005\u0003\u0005\u0003\u0005\u0003\u0005\u0003",
+	    "\u0005\u0003\u0005\u0007\u0005i\n\u0005\f\u0005\u000e\u0005l\u000b\u0005",
+	    "\u0003\u0005\u0003\u0005\u0003\u0006\u0003\u0006\u0005\u0006r\n\u0006",
+	    "\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006",
+	    "\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006\u0003\u0006",
+	    "\u0003\u0006\u0005\u0006\u0081\n\u0006\u0003\u0007\u0003\u0007\u0005",
+	    "\u0007\u0085\n\u0007\u0003\b\u0003\b\u0003\t\u0003\t\u0003\n\u0003\n",
+	    "\u0003\n\u0003\n\u0005\n\u008f\n\n\u0003\n\u0003\n\u0003\n\u0003\n\u0003",
+	    "\u000b\u0003\u000b\u0003\u000b\u0003\u000b\u0003\u000b\u0003\u000b\u0003",
+	    "\u000b\u0007\u000b\u009c\n\u000b\f\u000b\u000e\u000b\u009f\u000b\u000b",
+	    "\u0003\u000b\u0003\u000b\u0003\f\u0003\f\u0003\f\u0005\f\u00a6\n\f\u0003",
+	    "\f\u0003\f\u0003\f\u0003\f\u0003\f\u0003\f\u0005\f\u00ae\n\f\u0003\f",
+	    "\u0002\u0003\u0006\r\u0002\u0004\u0006\b\n\f\u000e\u0010\u0012\u0014",
+	    "\u0016\u0002\n\u0003\u0002\b\u000b\u0003\u0002\f\r\u0003\u0002\u000e",
+	    "\u000f\u0003\u0002\u0010\u0013\u0003\u0002\u0014\u0015\u0003\u0002\u0016",
+	    "\u0019\u0003\u0002\u001a\u001e\u0004\u0002\b\b $\u00bb\u0002\u0018\u0003",
+	    "\u0002\u0002\u0002\u0004\u001f\u0003\u0002\u0002\u0002\u00067\u0003",
+	    "\u0002\u0002\u0002\ba\u0003\u0002\u0002\u0002\n\u0080\u0003\u0002\u0002",
+	    "\u0002\f\u0082\u0003\u0002\u0002\u0002\u000e\u0086\u0003\u0002\u0002",
+	    "\u0002\u0010\u0088\u0003\u0002\u0002\u0002\u0012\u008a\u0003\u0002\u0002",
+	    "\u0002\u0014\u0094\u0003\u0002\u0002\u0002\u0016\u00ad\u0003\u0002\u0002",
+	    "\u0002\u0018\u001c\u0005\u0004\u0003\u0002\u0019\u001b\u0005\u0004\u0003",
+	    "\u0002\u001a\u0019\u0003\u0002\u0002\u0002\u001b\u001e\u0003\u0002\u0002",
+	    "\u0002\u001c\u001a\u0003\u0002\u0002\u0002\u001c\u001d\u0003\u0002\u0002",
+	    "\u0002\u001d\u0003\u0003\u0002\u0002\u0002\u001e\u001c\u0003\u0002\u0002",
+	    "\u0002\u001f \u0007+\u0002\u0002 !\u0007\u0003\u0002\u0002!\"\u0005",
+	    "\b\u0005\u0002\"#\u0007\u0004\u0002\u0002#$\u0003\u0002\u0002\u0002",
+	    "$%\u0007\u0005\u0002\u0002%\'\u0005\u0006\u0004\u0002&(\u0007\u0006",
+	    "\u0002\u0002\'&\u0003\u0002\u0002\u0002\'(\u0003\u0002\u0002\u0002(",
+	    ")\u0003\u0002\u0002\u0002)*\u0007\u0007\u0002\u0002*\u0005\u0003\u0002",
 	    "\u0002\u0002+,\b\u0004\u0001\u0002,-\u0007\u0003\u0002\u0002-.\u0005",
 	    "\u0006\u0004\u0002./\u0007\u0004\u0002\u0002/0\b\u0004\u0001\u00020",
 	    "8\u0003\u0002\u0002\u000212\u0005\b\u0005\u000223\b\u0004\u0001\u0002",
 	    "38\u0003\u0002\u0002\u000245\u0005\u0016\f\u000256\b\u0004\u0001\u0002",
 	    "68\u0003\u0002\u0002\u00027+\u0003\u0002\u0002\u000271\u0003\u0002\u0002",
-	    "\u000274\u0003\u0002\u0002\u00028T\u0003\u0002\u0002\u00029:\f\n\u0002",
-	    "\u0002:;\t\u0002\u0002\u0002;<\u0005\u0006\u0004\u000b<=\b\u0004\u0001",
-	    "\u0002=S\u0003\u0002\u0002\u0002>?\f\t\u0002\u0002?@\t\u0003\u0002\u0002",
-	    "@A\u0005\u0006\u0004\nAB\b\u0004\u0001\u0002BS\u0003\u0002\u0002\u0002",
-	    "CD\f\b\u0002\u0002DE\t\u0004\u0002\u0002EF\u0005\u0006\u0004\tFG\b\u0004",
-	    "\u0001\u0002GS\u0003\u0002\u0002\u0002HI\f\u0007\u0002\u0002IJ\u0007",
-	    "\u0015\u0002\u0002JK\u0005\u0006\u0004\bKL\b\u0004\u0001\u0002LS\u0003",
-	    "\u0002\u0002\u0002MN\f\u0006\u0002\u0002NO\u0007\u0014\u0002\u0002O",
-	    "P\u0005\u0006\u0004\u0007PQ\b\u0004\u0001\u0002QS\u0003\u0002\u0002",
-	    "\u0002R9\u0003\u0002\u0002\u0002R>\u0003\u0002\u0002\u0002RC\u0003\u0002",
-	    "\u0002\u0002RH\u0003\u0002\u0002\u0002RM\u0003\u0002\u0002\u0002SV\u0003",
-	    "\u0002\u0002\u0002TR\u0003\u0002\u0002\u0002TU\u0003\u0002\u0002\u0002",
-	    "U\u0007\u0003\u0002\u0002\u0002VT\u0003\u0002\u0002\u0002WX\b\u0005",
-	    "\u0001\u0002XY\u0005\n\u0006\u0002Y`\b\u0005\u0001\u0002Z[\u0007\u000e",
-	    "\u0002\u0002[\\\u0005\n\u0006\u0002\\]\b\u0005\u0001\u0002]_\u0003\u0002",
-	    "\u0002\u0002^Z\u0003\u0002\u0002\u0002_b\u0003\u0002\u0002\u0002`^\u0003",
-	    "\u0002\u0002\u0002`a\u0003\u0002\u0002\u0002ac\u0003\u0002\u0002\u0002",
-	    "b`\u0003\u0002\u0002\u0002cd\b\u0005\u0001\u0002d\t\u0003\u0002\u0002",
-	    "\u0002eg\u0005\f\u0007\u0002fh\u0005\u000e\b\u0002gf\u0003\u0002\u0002",
-	    "\u0002gh\u0003\u0002\u0002\u0002hi\u0003\u0002\u0002\u0002ij\b\u0006",
-	    "\u0001\u0002jw\u0003\u0002\u0002\u0002kl\u0005\u0012\n\u0002lm\b\u0006",
-	    "\u0001\u0002mw\u0003\u0002\u0002\u0002no\u0005\u0010\t\u0002op\b\u0006",
-	    "\u0001\u0002pw\u0003\u0002\u0002\u0002qr\u0007\u0003\u0002\u0002rs\u0005",
-	    "\u0006\u0004\u0002st\u0007\u0004\u0002\u0002tu\b\u0006\u0001\u0002u",
-	    "w\u0003\u0002\u0002\u0002ve\u0003\u0002\u0002\u0002vk\u0003\u0002\u0002",
-	    "\u0002vn\u0003\u0002\u0002\u0002vq\u0003\u0002\u0002\u0002w\u000b\u0003",
-	    "\u0002\u0002\u0002xz\u0007\u001b\u0002\u0002y{\u0007\u001a\u0002\u0002",
-	    "zy\u0003\u0002\u0002\u0002z{\u0003\u0002\u0002\u0002{\r\u0003\u0002",
-	    "\u0002\u0002|}\u0007\b\u0002\u0002}\u000f\u0003\u0002\u0002\u0002~\u007f",
-	    "\t\u0005\u0002\u0002\u007f\u0011\u0003\u0002\u0002\u0002\u0080\u0081",
-	    "\b\n\u0001\u0002\u0081\u0082\u0007\u001b\u0002\u0002\u0082\u0084\u0007",
-	    "\u0003\u0002\u0002\u0083\u0085\u0005\u0014\u000b\u0002\u0084\u0083\u0003",
-	    "\u0002\u0002\u0002\u0084\u0085\u0003\u0002\u0002\u0002\u0085\u0086\u0003",
-	    "\u0002\u0002\u0002\u0086\u0087\b\n\u0001\u0002\u0087\u0088\u0007\u0004",
-	    "\u0002\u0002\u0088\u0089\b\n\u0001\u0002\u0089\u0013\u0003\u0002\u0002",
-	    "\u0002\u008a\u008b\b\u000b\u0001\u0002\u008b\u008c\u0005\u0006\u0004",
-	    "\u0002\u008c\u0093\b\u000b\u0001\u0002\u008d\u008e\u0007\u0013\u0002",
-	    "\u0002\u008e\u008f\u0005\u0006\u0004\u0002\u008f\u0090\b\u000b\u0001",
-	    "\u0002\u0090\u0092\u0003\u0002\u0002\u0002\u0091\u008d\u0003\u0002\u0002",
-	    "\u0002\u0092\u0095\u0003\u0002\u0002\u0002\u0093\u0091\u0003\u0002\u0002",
-	    "\u0002\u0093\u0094\u0003\u0002\u0002\u0002\u0094\u0096\u0003\u0002\u0002",
-	    "\u0002\u0095\u0093\u0003\u0002\u0002\u0002\u0096\u0097\b\u000b\u0001",
-	    "\u0002\u0097\u0015\u0003\u0002\u0002\u0002\u0098\u0099\u0007\u0018\u0002",
-	    "\u0002\u0099\u00a4\b\f\u0001\u0002\u009a\u009c\u0007\u000b\u0002\u0002",
-	    "\u009b\u009a\u0003\u0002\u0002\u0002\u009b\u009c\u0003\u0002\u0002\u0002",
-	    "\u009c\u009d\u0003\u0002\u0002\u0002\u009d\u009e\u0007\u0019\u0002\u0002",
-	    "\u009e\u00a4\b\f\u0001\u0002\u009f\u00a0\u0007\u0016\u0002\u0002\u00a0",
-	    "\u00a4\b\f\u0001\u0002\u00a1\u00a2\u0007\u0017\u0002\u0002\u00a2\u00a4",
-	    "\b\f\u0001\u0002\u00a3\u0098\u0003\u0002\u0002\u0002\u00a3\u009b\u0003",
-	    "\u0002\u0002\u0002\u00a3\u009f\u0003\u0002\u0002\u0002\u00a3\u00a1\u0003",
-	    "\u0002\u0002\u0002\u00a4\u0017\u0003\u0002\u0002\u0002\u000f\u001c\'",
-	    "7RT`gvz\u0084\u0093\u009b\u00a3"].join("");
+	    "\u000274\u0003\u0002\u0002\u00028^\u0003\u0002\u0002\u00029:\f\f\u0002",
+	    "\u0002:;\t\u0002\u0002\u0002;<\u0005\u0006\u0004\r<=\b\u0004\u0001\u0002",
+	    "=]\u0003\u0002\u0002\u0002>?\f\u000b\u0002\u0002?@\t\u0003\u0002\u0002",
+	    "@A\u0005\u0006\u0004\fAB\b\u0004\u0001\u0002B]\u0003\u0002\u0002\u0002",
+	    "CD\f\n\u0002\u0002DE\t\u0004\u0002\u0002EF\u0005\u0006\u0004\u000bF",
+	    "G\b\u0004\u0001\u0002G]\u0003\u0002\u0002\u0002HI\f\t\u0002\u0002IJ",
+	    "\t\u0005\u0002\u0002JK\u0005\u0006\u0004\nKL\b\u0004\u0001\u0002L]\u0003",
+	    "\u0002\u0002\u0002MN\f\b\u0002\u0002NO\t\u0006\u0002\u0002OP\u0005\u0006",
+	    "\u0004\tPQ\b\u0004\u0001\u0002Q]\u0003\u0002\u0002\u0002RS\f\u0007\u0002",
+	    "\u0002ST\t\u0007\u0002\u0002TU\u0005\u0006\u0004\bUV\b\u0004\u0001\u0002",
+	    "V]\u0003\u0002\u0002\u0002WX\f\u0006\u0002\u0002XY\t\b\u0002\u0002Y",
+	    "Z\u0005\u0006\u0004\u0007Z[\b\u0004\u0001\u0002[]\u0003\u0002\u0002",
+	    "\u0002\\9\u0003\u0002\u0002\u0002\\>\u0003\u0002\u0002\u0002\\C\u0003",
+	    "\u0002\u0002\u0002\\H\u0003\u0002\u0002\u0002\\M\u0003\u0002\u0002\u0002",
+	    "\\R\u0003\u0002\u0002\u0002\\W\u0003\u0002\u0002\u0002]`\u0003\u0002",
+	    "\u0002\u0002^\\\u0003\u0002\u0002\u0002^_\u0003\u0002\u0002\u0002_\u0007",
+	    "\u0003\u0002\u0002\u0002`^\u0003\u0002\u0002\u0002ab\b\u0005\u0001\u0002",
+	    "bc\u0005\n\u0006\u0002cj\b\u0005\u0001\u0002de\u0007\u001f\u0002\u0002",
+	    "ef\u0005\n\u0006\u0002fg\b\u0005\u0001\u0002gi\u0003\u0002\u0002\u0002",
+	    "hd\u0003\u0002\u0002\u0002il\u0003\u0002\u0002\u0002jh\u0003\u0002\u0002",
+	    "\u0002jk\u0003\u0002\u0002\u0002km\u0003\u0002\u0002\u0002lj\u0003\u0002",
+	    "\u0002\u0002mn\b\u0005\u0001\u0002n\t\u0003\u0002\u0002\u0002oq\u0005",
+	    "\f\u0007\u0002pr\u0005\u000e\b\u0002qp\u0003\u0002\u0002\u0002qr\u0003",
+	    "\u0002\u0002\u0002rs\u0003\u0002\u0002\u0002st\b\u0006\u0001\u0002t",
+	    "\u0081\u0003\u0002\u0002\u0002uv\u0005\u0012\n\u0002vw\b\u0006\u0001",
+	    "\u0002w\u0081\u0003\u0002\u0002\u0002xy\u0005\u0010\t\u0002yz\b\u0006",
+	    "\u0001\u0002z\u0081\u0003\u0002\u0002\u0002{|\u0007\u0003\u0002\u0002",
+	    "|}\u0005\u0006\u0004\u0002}~\u0007\u0004\u0002\u0002~\u007f\b\u0006",
+	    "\u0001\u0002\u007f\u0081\u0003\u0002\u0002\u0002\u0080o\u0003\u0002",
+	    "\u0002\u0002\u0080u\u0003\u0002\u0002\u0002\u0080x\u0003\u0002\u0002",
+	    "\u0002\u0080{\u0003\u0002\u0002\u0002\u0081\u000b\u0003\u0002\u0002",
+	    "\u0002\u0082\u0084\u0007+\u0002\u0002\u0083\u0085\u0007*\u0002\u0002",
+	    "\u0084\u0083\u0003\u0002\u0002\u0002\u0084\u0085\u0003\u0002\u0002\u0002",
+	    "\u0085\r\u0003\u0002\u0002\u0002\u0086\u0087\u0007\b\u0002\u0002\u0087",
+	    "\u000f\u0003\u0002\u0002\u0002\u0088\u0089\t\t\u0002\u0002\u0089\u0011",
+	    "\u0003\u0002\u0002\u0002\u008a\u008b\b\n\u0001\u0002\u008b\u008c\u0007",
+	    "+\u0002\u0002\u008c\u008e\u0007\u0003\u0002\u0002\u008d\u008f\u0005",
+	    "\u0014\u000b\u0002\u008e\u008d\u0003\u0002\u0002\u0002\u008e\u008f\u0003",
+	    "\u0002\u0002\u0002\u008f\u0090\u0003\u0002\u0002\u0002\u0090\u0091\b",
+	    "\n\u0001\u0002\u0091\u0092\u0007\u0004\u0002\u0002\u0092\u0093\b\n\u0001",
+	    "\u0002\u0093\u0013\u0003\u0002\u0002\u0002\u0094\u0095\b\u000b\u0001",
+	    "\u0002\u0095\u0096\u0005\u0006\u0004\u0002\u0096\u009d\b\u000b\u0001",
+	    "\u0002\u0097\u0098\u0007%\u0002\u0002\u0098\u0099\u0005\u0006\u0004",
+	    "\u0002\u0099\u009a\b\u000b\u0001\u0002\u009a\u009c\u0003\u0002\u0002",
+	    "\u0002\u009b\u0097\u0003\u0002\u0002\u0002\u009c\u009f\u0003\u0002\u0002",
+	    "\u0002\u009d\u009b\u0003\u0002\u0002\u0002\u009d\u009e\u0003\u0002\u0002",
+	    "\u0002\u009e\u00a0\u0003\u0002\u0002\u0002\u009f\u009d\u0003\u0002\u0002",
+	    "\u0002\u00a0\u00a1\b\u000b\u0001\u0002\u00a1\u0015\u0003\u0002\u0002",
+	    "\u0002\u00a2\u00a3\u0007(\u0002\u0002\u00a3\u00ae\b\f\u0001\u0002\u00a4",
+	    "\u00a6\u0007\r\u0002\u0002\u00a5\u00a4\u0003\u0002\u0002\u0002\u00a5",
+	    "\u00a6\u0003\u0002\u0002\u0002\u00a6\u00a7\u0003\u0002\u0002\u0002\u00a7",
+	    "\u00a8\u0007)\u0002\u0002\u00a8\u00ae\b\f\u0001\u0002\u00a9\u00aa\u0007",
+	    "&\u0002\u0002\u00aa\u00ae\b\f\u0001\u0002\u00ab\u00ac\u0007\'\u0002",
+	    "\u0002\u00ac\u00ae\b\f\u0001\u0002\u00ad\u00a2\u0003\u0002\u0002\u0002",
+	    "\u00ad\u00a5\u0003\u0002\u0002\u0002\u00ad\u00a9\u0003\u0002\u0002\u0002",
+	    "\u00ad\u00ab\u0003\u0002\u0002\u0002\u00ae\u0017\u0003\u0002\u0002\u0002",
+	    "\u000f\u001c\'7\\^jq\u0080\u0084\u008e\u009d\u00a5\u00ad"].join("");
 
 
 	var atn = new antlr4.atn.ATNDeserializer().deserialize(serializedATN);
@@ -13316,15 +13644,19 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var sharedContextCache = new antlr4.PredictionContextCache();
 
-	var literalNames = [ 'null', "'('", "')'", "':'", "'\r'", "'\n'", "'*'", 
-	                     "'/'", "'+'", "'-'", "'|'", "'&'", "'.'", "'**'", "'$context'", 
-	                     "'$resource'", "'$parent'", "','", 'null', 'null', 
-	                     'null', 'null', 'null', 'null', "'[x]'" ];
+	var literalNames = [ null, "'('", "')'", "':'", "'\r'", "'\n'", "'*'", "'/'", 
+	                     "'div'", "'mod'", "'+'", "'-'", "'|'", "'&'", "'>'", 
+	                     "'<'", "'<='", "'>='", "'is'", "'as'", "'='", "'~'", 
+	                     "'!='", "'!~'", "'in'", "'and'", "'xor'", "'or'", "'implies'", 
+	                     "'.'", "'**'", "'$context'", "'$resource'", "'$parent'", 
+	                     "'$this'", "','", null, null, null, null, "'[x]'" ];
 
-	var symbolicNames = [ 'null', 'null', 'null', 'null', 'null', 'null', 'null', 
-	                      'null', 'null', 'null', 'null', 'null', 'null', 'null', 
-	                      'null', 'null', 'null', 'null', "LOGIC", "COMP", "BOOL", 
-	                      "CONST", "STRING", "NUMBER", "CHOICE", "ID", "WS" ];
+	var symbolicNames = [ null, null, null, null, null, null, null, null, null, 
+	                      null, null, null, null, null, null, null, null, null, 
+	                      null, null, null, null, null, null, null, null, null, 
+	                      null, null, null, null, null, null, null, null, null, 
+	                      "BOOL", "CONST", "STRING", "NUMBER", "CHOICE", "ID", 
+	                      "WS" ];
 
 	var ruleNames =  [ "prog", "line", "expr", "predicate", "item", "element", 
 	                   "recurse", "axis_spec", "fp_function", "param_list", 
@@ -13366,15 +13698,31 @@ return /******/ (function(modules) { // webpackBootstrap
 	fhirpathParser.T__14 = 15;
 	fhirpathParser.T__15 = 16;
 	fhirpathParser.T__16 = 17;
-	fhirpathParser.LOGIC = 18;
-	fhirpathParser.COMP = 19;
-	fhirpathParser.BOOL = 20;
-	fhirpathParser.CONST = 21;
-	fhirpathParser.STRING = 22;
-	fhirpathParser.NUMBER = 23;
-	fhirpathParser.CHOICE = 24;
-	fhirpathParser.ID = 25;
-	fhirpathParser.WS = 26;
+	fhirpathParser.T__17 = 18;
+	fhirpathParser.T__18 = 19;
+	fhirpathParser.T__19 = 20;
+	fhirpathParser.T__20 = 21;
+	fhirpathParser.T__21 = 22;
+	fhirpathParser.T__22 = 23;
+	fhirpathParser.T__23 = 24;
+	fhirpathParser.T__24 = 25;
+	fhirpathParser.T__25 = 26;
+	fhirpathParser.T__26 = 27;
+	fhirpathParser.T__27 = 28;
+	fhirpathParser.T__28 = 29;
+	fhirpathParser.T__29 = 30;
+	fhirpathParser.T__30 = 31;
+	fhirpathParser.T__31 = 32;
+	fhirpathParser.T__32 = 33;
+	fhirpathParser.T__33 = 34;
+	fhirpathParser.T__34 = 35;
+	fhirpathParser.BOOL = 36;
+	fhirpathParser.CONST = 37;
+	fhirpathParser.STRING = 38;
+	fhirpathParser.NUMBER = 39;
+	fhirpathParser.CHOICE = 40;
+	fhirpathParser.ID = 41;
+	fhirpathParser.WS = 42;
 
 	fhirpathParser.RULE_prog = 0;
 	fhirpathParser.RULE_line = 1;
@@ -13594,14 +13942,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return this.getTypedRuleContext(Fp_constContext,0);
 	};
 
-	ExprContext.prototype.COMP = function() {
-	    return this.getToken(fhirpathParser.COMP, 0);
-	};
-
-	ExprContext.prototype.LOGIC = function() {
-	    return this.getToken(fhirpathParser.LOGIC, 0);
-	};
-
 	ExprContext.prototype.enterRule = function(listener) {
 	    if(listener instanceof fhirpathListener ) {
 	        listener.enterExpr(this);
@@ -13630,6 +13970,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    try {
 	        this.enterOuterAlt(localctx, 1);
 	        this.state = 53;
+	        this._errHandler.sync(this);
 	        var la_ = this._interp.adaptivePredict(this._input,2,this._ctx);
 	        switch(la_) {
 	        case 1:
@@ -13656,7 +13997,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	        }
 	        this._ctx.stop = this._input.LT(-1);
-	        this.state = 82;
+	        this.state = 92;
 	        this._errHandler.sync(this);
 	        var _alt = this._interp.adaptivePredict(this._input,4,this._ctx)
 	        while(_alt!=2 && _alt!=antlr4.atn.ATN.INVALID_ALT_NUMBER) {
@@ -13665,7 +14006,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	                    this.triggerExitRuleEvent();
 	                }
 	                _prevctx = localctx;
-	                this.state = 80;
+	                this.state = 90;
+	                this._errHandler.sync(this);
 	                var la_ = this._interp.adaptivePredict(this._input,3,this._ctx);
 	                switch(la_) {
 	                case 1:
@@ -13673,20 +14015,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	                    localctx.a = _prevctx;
 	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
 	                    this.state = 55;
-	                    if (!( this.precpred(this._ctx, 8))) {
-	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 8)");
+	                    if (!( this.precpred(this._ctx, 10))) {
+	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 10)");
 	                    }
 	                    this.state = 56;
 	                    localctx.op = this._input.LT(1);
 	                    _la = this._input.LA(1);
-	                    if(!(_la===fhirpathParser.T__5 || _la===fhirpathParser.T__6)) {
+	                    if(!((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__5) | (1 << fhirpathParser.T__6) | (1 << fhirpathParser.T__7) | (1 << fhirpathParser.T__8))) !== 0))) {
 	                        localctx.op = this._errHandler.recoverInline(this);
 	                    }
 	                    else {
 	                        this.consume();
 	                    }
 	                    this.state = 57;
-	                    localctx.b = this.expr(9);
+	                    localctx.b = this.expr(11);
 	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
 	                    break;
 
@@ -13695,32 +14037,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	                    localctx.a = _prevctx;
 	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
 	                    this.state = 60;
-	                    if (!( this.precpred(this._ctx, 7))) {
-	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 7)");
+	                    if (!( this.precpred(this._ctx, 9))) {
+	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 9)");
 	                    }
 	                    this.state = 61;
-	                    localctx.op = this._input.LT(1);
-	                    _la = this._input.LA(1);
-	                    if(!(_la===fhirpathParser.T__7 || _la===fhirpathParser.T__8)) {
-	                        localctx.op = this._errHandler.recoverInline(this);
-	                    }
-	                    else {
-	                        this.consume();
-	                    }
-	                    this.state = 62;
-	                    localctx.b = this.expr(8);
-	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
-	                    break;
-
-	                case 3:
-	                    localctx = new ExprContext(this, _parentctx, _parentState);
-	                    localctx.a = _prevctx;
-	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
-	                    this.state = 65;
-	                    if (!( this.precpred(this._ctx, 6))) {
-	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 6)");
-	                    }
-	                    this.state = 66;
 	                    localctx.op = this._input.LT(1);
 	                    _la = this._input.LA(1);
 	                    if(!(_la===fhirpathParser.T__9 || _la===fhirpathParser.T__10)) {
@@ -13729,8 +14049,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	                    else {
 	                        this.consume();
 	                    }
+	                    this.state = 62;
+	                    localctx.b = this.expr(10);
+	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
+	                    break;
+
+	                case 3:
+	                    localctx = new ExprContext(this, _parentctx, _parentState);
+	                    localctx.a = _prevctx;
+	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
+	                    this.state = 65;
+	                    if (!( this.precpred(this._ctx, 8))) {
+	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 8)");
+	                    }
+	                    this.state = 66;
+	                    localctx.op = this._input.LT(1);
+	                    _la = this._input.LA(1);
+	                    if(!(_la===fhirpathParser.T__11 || _la===fhirpathParser.T__12)) {
+	                        localctx.op = this._errHandler.recoverInline(this);
+	                    }
+	                    else {
+	                        this.consume();
+	                    }
 	                    this.state = 67;
-	                    localctx.b = this.expr(7);
+	                    localctx.b = this.expr(9);
 	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
 	                    break;
 
@@ -13739,13 +14081,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	                    localctx.a = _prevctx;
 	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
 	                    this.state = 70;
-	                    if (!( this.precpred(this._ctx, 5))) {
-	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 5)");
+	                    if (!( this.precpred(this._ctx, 7))) {
+	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 7)");
 	                    }
 	                    this.state = 71;
-	                    localctx.op = this.match(fhirpathParser.COMP);
+	                    localctx.op = this._input.LT(1);
+	                    _la = this._input.LA(1);
+	                    if(!((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__13) | (1 << fhirpathParser.T__14) | (1 << fhirpathParser.T__15) | (1 << fhirpathParser.T__16))) !== 0))) {
+	                        localctx.op = this._errHandler.recoverInline(this);
+	                    }
+	                    else {
+	                        this.consume();
+	                    }
 	                    this.state = 72;
-	                    localctx.b = this.expr(6);
+	                    localctx.b = this.expr(8);
 	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
 	                    break;
 
@@ -13754,19 +14103,70 @@ return /******/ (function(modules) { // webpackBootstrap
 	                    localctx.a = _prevctx;
 	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
 	                    this.state = 75;
+	                    if (!( this.precpred(this._ctx, 6))) {
+	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 6)");
+	                    }
+	                    this.state = 76;
+	                    localctx.op = this._input.LT(1);
+	                    _la = this._input.LA(1);
+	                    if(!(_la===fhirpathParser.T__17 || _la===fhirpathParser.T__18)) {
+	                        localctx.op = this._errHandler.recoverInline(this);
+	                    }
+	                    else {
+	                        this.consume();
+	                    }
+	                    this.state = 77;
+	                    localctx.b = this.expr(7);
+	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
+	                    break;
+
+	                case 6:
+	                    localctx = new ExprContext(this, _parentctx, _parentState);
+	                    localctx.a = _prevctx;
+	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
+	                    this.state = 80;
+	                    if (!( this.precpred(this._ctx, 5))) {
+	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 5)");
+	                    }
+	                    this.state = 81;
+	                    localctx.op = this._input.LT(1);
+	                    _la = this._input.LA(1);
+	                    if(!((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__19) | (1 << fhirpathParser.T__20) | (1 << fhirpathParser.T__21) | (1 << fhirpathParser.T__22))) !== 0))) {
+	                        localctx.op = this._errHandler.recoverInline(this);
+	                    }
+	                    else {
+	                        this.consume();
+	                    }
+	                    this.state = 82;
+	                    localctx.b = this.expr(6);
+	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
+	                    break;
+
+	                case 7:
+	                    localctx = new ExprContext(this, _parentctx, _parentState);
+	                    localctx.a = _prevctx;
+	                    this.pushNewRecursionContext(localctx, _startState, fhirpathParser.RULE_expr);
+	                    this.state = 85;
 	                    if (!( this.precpred(this._ctx, 4))) {
 	                        throw new antlr4.error.FailedPredicateException(this, "this.precpred(this._ctx, 4)");
 	                    }
-	                    this.state = 76;
-	                    localctx.op = this.match(fhirpathParser.LOGIC);
-	                    this.state = 77;
+	                    this.state = 86;
+	                    localctx.op = this._input.LT(1);
+	                    _la = this._input.LA(1);
+	                    if(!((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__23) | (1 << fhirpathParser.T__24) | (1 << fhirpathParser.T__25) | (1 << fhirpathParser.T__26) | (1 << fhirpathParser.T__27))) !== 0))) {
+	                        localctx.op = this._errHandler.recoverInline(this);
+	                    }
+	                    else {
+	                        this.consume();
+	                    }
+	                    this.state = 87;
 	                    localctx.b = this.expr(5);
 	                    localctx.ret= [(localctx.op===null ? null : localctx.op.text), localctx.a.ret, localctx.b.ret]
 	                    break;
 
 	                } 
 	            }
-	            this.state = 84;
+	            this.state = 94;
 	            this._errHandler.sync(this);
 	            _alt = this._interp.adaptivePredict(this._input,4,this._ctx);
 	        }
@@ -13838,21 +14238,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	    try {
 	        this.enterOuterAlt(localctx, 1);
 	        var ret = [];
-	        this.state = 86;
+	        this.state = 96;
 	        localctx._item = this.item();
 	        ret.push(localctx._item.ret)
-	        this.state = 94;
+	        this.state = 104;
 	        this._errHandler.sync(this);
 	        var _alt = this._interp.adaptivePredict(this._input,5,this._ctx)
 	        while(_alt!=2 && _alt!=antlr4.atn.ATN.INVALID_ALT_NUMBER) {
 	            if(_alt===1) {
-	                this.state = 88;
-	                this.match(fhirpathParser.T__11);
-	                this.state = 89;
+	                this.state = 98;
+	                this.match(fhirpathParser.T__28);
+	                this.state = 99;
 	                localctx._item = this.item();
 	                ret.push(localctx._item.ret) 
 	            }
-	            this.state = 96;
+	            this.state = 106;
 	            this._errHandler.sync(this);
 	            _alt = this._interp.adaptivePredict(this._input,5,this._ctx);
 	        }
@@ -13936,17 +14336,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var localctx = new ItemContext(this, this._ctx, this.state);
 	    this.enterRule(localctx, 8, fhirpathParser.RULE_item);
 	    try {
-	        this.state = 116;
+	        this.state = 126;
+	        this._errHandler.sync(this);
 	        var la_ = this._interp.adaptivePredict(this._input,7,this._ctx);
 	        switch(la_) {
 	        case 1:
 	            this.enterOuterAlt(localctx, 1);
-	            this.state = 99;
+	            this.state = 109;
 	            localctx._element = this.element();
-	            this.state = 101;
+	            this.state = 111;
+	            this._errHandler.sync(this);
 	            var la_ = this._interp.adaptivePredict(this._input,6,this._ctx);
 	            if(la_===1) {
-	                this.state = 100;
+	                this.state = 110;
 	                localctx._recurse = this.recurse();
 
 	            }
@@ -13955,25 +14357,25 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	        case 2:
 	            this.enterOuterAlt(localctx, 2);
-	            this.state = 105;
+	            this.state = 115;
 	            localctx._fp_function = this.fp_function();
 	            localctx.ret =  localctx._fp_function.ret
 	            break;
 
 	        case 3:
 	            this.enterOuterAlt(localctx, 3);
-	            this.state = 108;
+	            this.state = 118;
 	            localctx._axis_spec = this.axis_spec();
 	            localctx.ret = ["$"+"axis", (localctx._axis_spec===null ? null : this._input.getText(new antlr4.Interval(localctx._axis_spec.start,localctx._axis_spec.stop)))]
 	            break;
 
 	        case 4:
 	            this.enterOuterAlt(localctx, 4);
-	            this.state = 111;
+	            this.state = 121;
 	            this.match(fhirpathParser.T__0);
-	            this.state = 112;
+	            this.state = 122;
 	            localctx._expr = this.expr(0);
-	            this.state = 113;
+	            this.state = 123;
 	            this.match(fhirpathParser.T__1);
 	            localctx.ret = localctx._expr.ret
 	            break;
@@ -14040,12 +14442,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.enterRule(localctx, 10, fhirpathParser.RULE_element);
 	    try {
 	        this.enterOuterAlt(localctx, 1);
-	        this.state = 118;
+	        this.state = 128;
 	        this.match(fhirpathParser.ID);
-	        this.state = 120;
+	        this.state = 130;
+	        this._errHandler.sync(this);
 	        var la_ = this._interp.adaptivePredict(this._input,8,this._ctx);
 	        if(la_===1) {
-	            this.state = 119;
+	            this.state = 129;
 	            this.match(fhirpathParser.CHOICE);
 
 	        }
@@ -14103,7 +14506,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.enterRule(localctx, 12, fhirpathParser.RULE_recurse);
 	    try {
 	        this.enterOuterAlt(localctx, 1);
-	        this.state = 122;
+	        this.state = 132;
 	        this.match(fhirpathParser.T__5);
 	    } catch (re) {
 	    	if(re instanceof antlr4.error.RecognitionException) {
@@ -14160,9 +14563,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _la = 0; // Token type
 	    try {
 	        this.enterOuterAlt(localctx, 1);
-	        this.state = 124;
+	        this.state = 134;
 	        _la = this._input.LA(1);
-	        if(!((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__5) | (1 << fhirpathParser.T__12) | (1 << fhirpathParser.T__13) | (1 << fhirpathParser.T__14) | (1 << fhirpathParser.T__15))) !== 0))) {
+	        if(!(((((_la - 6)) & ~0x1f) == 0 && ((1 << (_la - 6)) & ((1 << (fhirpathParser.T__5 - 6)) | (1 << (fhirpathParser.T__29 - 6)) | (1 << (fhirpathParser.T__30 - 6)) | (1 << (fhirpathParser.T__31 - 6)) | (1 << (fhirpathParser.T__32 - 6)) | (1 << (fhirpathParser.T__33 - 6)))) !== 0))) {
 	        this._errHandler.recoverInline(this);
 	        }
 	        else {
@@ -14234,19 +14637,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	    try {
 	        this.enterOuterAlt(localctx, 1);
 	        var params = []
-	        this.state = 127;
+	        this.state = 137;
 	        localctx._ID = this.match(fhirpathParser.ID);
-	        this.state = 128;
+	        this.state = 138;
 	        this.match(fhirpathParser.T__0);
-	        this.state = 130;
+	        this.state = 140;
 	        _la = this._input.LA(1);
-	        if((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__0) | (1 << fhirpathParser.T__5) | (1 << fhirpathParser.T__8) | (1 << fhirpathParser.T__12) | (1 << fhirpathParser.T__13) | (1 << fhirpathParser.T__14) | (1 << fhirpathParser.T__15) | (1 << fhirpathParser.BOOL) | (1 << fhirpathParser.CONST) | (1 << fhirpathParser.STRING) | (1 << fhirpathParser.NUMBER) | (1 << fhirpathParser.ID))) !== 0)) {
-	            this.state = 129;
+	        if((((_la) & ~0x1f) == 0 && ((1 << _la) & ((1 << fhirpathParser.T__0) | (1 << fhirpathParser.T__5) | (1 << fhirpathParser.T__10) | (1 << fhirpathParser.T__29) | (1 << fhirpathParser.T__30))) !== 0) || ((((_la - 32)) & ~0x1f) == 0 && ((1 << (_la - 32)) & ((1 << (fhirpathParser.T__31 - 32)) | (1 << (fhirpathParser.T__32 - 32)) | (1 << (fhirpathParser.T__33 - 32)) | (1 << (fhirpathParser.BOOL - 32)) | (1 << (fhirpathParser.CONST - 32)) | (1 << (fhirpathParser.STRING - 32)) | (1 << (fhirpathParser.NUMBER - 32)) | (1 << (fhirpathParser.ID - 32)))) !== 0)) {
+	            this.state = 139;
 	            localctx._param_list = this.param_list();
 	        }
 
 	        if ((localctx._param_list===null ? null : this._input.getText(new antlr4.Interval(localctx._param_list.start,localctx._param_list.stop)))) params = localctx._param_list.ret
-	        this.state = 133;
+	        this.state = 143;
 	        this.match(fhirpathParser.T__1);
 	        localctx.ret = ["$"+(localctx._ID===null ? null : localctx._ID.text)].concat(params)
 	    } catch (re) {
@@ -14317,19 +14720,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	    try {
 	        this.enterOuterAlt(localctx, 1);
 	        var ret = [];
-	        this.state = 137;
+	        this.state = 147;
 	        localctx._expr = this.expr(0);
 	        ret.push(localctx._expr.ret)
-	        this.state = 145;
+	        this.state = 155;
 	        this._errHandler.sync(this);
 	        _la = this._input.LA(1);
-	        while(_la===fhirpathParser.T__16) {
-	            this.state = 139;
-	            this.match(fhirpathParser.T__16);
-	            this.state = 140;
+	        while(_la===fhirpathParser.T__34) {
+	            this.state = 149;
+	            this.match(fhirpathParser.T__34);
+	            this.state = 150;
 	            localctx._expr = this.expr(0);
 	            ret.push(localctx._expr.ret)
-	            this.state = 147;
+	            this.state = 157;
 	            this._errHandler.sync(this);
 	            _la = this._input.LA(1);
 	        }
@@ -14408,37 +14811,37 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.enterRule(localctx, 20, fhirpathParser.RULE_fp_const);
 	    var _la = 0; // Token type
 	    try {
-	        this.state = 161;
+	        this.state = 171;
 	        switch(this._input.LA(1)) {
 	        case fhirpathParser.STRING:
 	            this.enterOuterAlt(localctx, 1);
-	            this.state = 150;
+	            this.state = 160;
 	            localctx._STRING = this.match(fhirpathParser.STRING);
 	            localctx.ret = ["$"+"constant",  (localctx._STRING===null ? null : localctx._STRING.text).slice(1,-1)]
 	            break;
-	        case fhirpathParser.T__8:
+	        case fhirpathParser.T__10:
 	        case fhirpathParser.NUMBER:
 	            this.enterOuterAlt(localctx, 2);
-	            this.state = 153;
+	            this.state = 163;
 	            _la = this._input.LA(1);
-	            if(_la===fhirpathParser.T__8) {
-	                this.state = 152;
-	                this.match(fhirpathParser.T__8);
+	            if(_la===fhirpathParser.T__10) {
+	                this.state = 162;
+	                this.match(fhirpathParser.T__10);
 	            }
 
-	            this.state = 155;
+	            this.state = 165;
 	            localctx._NUMBER = this.match(fhirpathParser.NUMBER);
 	            localctx.ret = ["$"+"constant", JSON.parse((localctx._NUMBER===null ? null : localctx._NUMBER.text))]
 	            break;
 	        case fhirpathParser.BOOL:
 	            this.enterOuterAlt(localctx, 3);
-	            this.state = 157;
+	            this.state = 167;
 	            localctx._BOOL = this.match(fhirpathParser.BOOL);
 	            localctx.ret = ["$"+"constant", JSON.parse((localctx._BOOL===null ? null : localctx._BOOL.text))]
 	            break;
 	        case fhirpathParser.CONST:
 	            this.enterOuterAlt(localctx, 4);
-	            this.state = 159;
+	            this.state = 169;
 	            localctx._CONST = this.match(fhirpathParser.CONST);
 	            localctx.ret = ["$"+"lookup", (localctx._CONST===null ? null : localctx._CONST.text).slice(1)]
 	            break;
@@ -14472,14 +14875,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	fhirpathParser.prototype.expr_sempred = function(localctx, predIndex) {
 		switch(predIndex) {
 			case 0:
-				return this.precpred(this._ctx, 8);
+				return this.precpred(this._ctx, 10);
 			case 1:
-				return this.precpred(this._ctx, 7);
+				return this.precpred(this._ctx, 9);
 			case 2:
-				return this.precpred(this._ctx, 6);
+				return this.precpred(this._ctx, 8);
 			case 3:
-				return this.precpred(this._ctx, 5);
+				return this.precpred(this._ctx, 7);
 			case 4:
+				return this.precpred(this._ctx, 6);
+			case 5:
+				return this.precpred(this._ctx, 5);
+			case 6:
 				return this.precpred(this._ctx, 4);
 			default:
 				throw "No predicate with index:" + predIndex;
@@ -14494,7 +14901,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 49 */
 /***/ function(module, exports, __webpack_require__) {
 
-	// Generated from fhirpath.g4 by ANTLR 4.5.1
+	// Generated from fhirpath.g4 by ANTLR 4.5.2
 	// jshint ignore: start
 	var antlr4 = __webpack_require__(1);
 

@@ -2,11 +2,11 @@ grammar fhirpath;
 
 // Grammar rules
 
-//version without precedence and left-recursion
+//version without left-recursion
 //expression: term (righthand)*;
 //righthand: op term | '.' function;
 //term: '(' expression ')' | const | predicate;
-//op: LOGIC | COMP | '*' | '/' | '+' | '-' | '|' | '&';
+//op:  'and' | 'or' | 'xor' | 'implies' | '=' | '~' | '!=' | '!~' | '>' | '<' | '<=' | '>=' | 'in' | '*' | '/' | '+' | '-' | '|' | '&';
 
 prog: line (line)*;
 
@@ -15,11 +15,13 @@ line: ID ( '(' predicate ')') ':' expr '\r'? '\n';
 //prog: expression (';' expression)* ';'?;
 
 expr returns [ret]:
-        a=expr op=('*' | '/') b=expr  {$ret= [$op.text, $a.ret, $b.ret]} |
+        a=expr op=('*' | '/' | 'div' | 'mod') b=expr  {$ret= [$op.text, $a.ret, $b.ret]} |
         a=expr op=('+' | '-') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
         a=expr op=('|' | '&') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
-        a=expr op=COMP b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
-        a=expr op=LOGIC b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
+        a=expr op=('>' | '<' | '<=' | '>=') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
+        a=expr op=('is' | 'as') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
+        a=expr op=('=' | '~' | '!=' | '!~') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
+        a=expr op=('in' |'and' | 'xor' | 'or' | 'implies') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
         '(' a=expr ')' {$ret = $a.ret}|
         predicate {$ret = $predicate.ret}|
         fp_const {$ret = $fp_const.ret};
@@ -31,7 +33,7 @@ item returns [ret]: element recurse? {$ret = ["\$path",  $element.text, !!($recu
                     '(' expr ')' {$ret = $expr.ret};
 element: ID CHOICE?;
 recurse: '*';
-axis_spec: '*' | '**' | '$context' | '$resource' | '$parent' ;
+axis_spec: '*' | '**' | '$context' | '$resource' | '$parent' | '$this' ;
 
 fp_function returns [ret]: {var params = []} ID '(' param_list? {if ($param_list.text) params = $param_list.ret} ')' {$ret = ["$"+$ID.text].concat(params)};
 param_list returns [ret]: {var ret = [];} expr {ret.push($expr.ret)} (',' expr {ret.push($expr.ret)})*
@@ -48,9 +50,6 @@ fp_const returns [ret]: STRING {$ret = ["$"+"constant",  $STRING.text.slice(1,-1
 
 
 // Lexical rules
-
-LOGIC: 'and' | 'or' | 'xor';
-COMP: '=' | '~' | '!=' | '!~' | '>' | '<' | '<=' | '>=' | 'in';
 BOOL: 'true' | 'false';
 
 CONST: '%' ALPHANUM (ALPHANUM | [\-.])*;
