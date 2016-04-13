@@ -180,6 +180,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	    "$select": applyToEach(function (item, context, conditions) {
 	        return run([item], withTree(context, conditions));
 	    }),
+	    "$repeat": applyToEach(function (item, context, conditions) {
+	        throw new Error('We haven\'t implemented method repeat yet.');
+	    }),
+	    "$is": applyToEach(function (item, context, conditions) {
+	        throw new Error('We haven\'t implemented method is yet.');
+	    }),
+	    "$as": applyToEach(function (item, context, conditions) {
+	        throw new Error('We haven\'t implemented method as yet.');
+	    }),
 	    "$constant": function $constant(_, context, val) {
 	        return [val];
 	    },
@@ -199,13 +208,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return coll.slice(1);
 	    },
 	    "$item": resolveArguments(function (coll, context, i) {
-	        return coll.slice(i, i + 1);
+	        return coll.slice(i[0], i[0] + 1);
 	    }),
 	    "$skip": resolveArguments(function (coll, context, i) {
-	        return coll.slice(i);
+	        return coll.slice(i[0]);
 	    }),
 	    "$take": resolveArguments(function (coll, context, i) {
-	        return coll.slice(0, i);
+	        return coll.slice(0, i[0]);
 	    }),
 	    // TODO: Clarify what collections are accepted by substring
 	    "$substring": resolveArguments(function (coll, context, start, count) {
@@ -299,6 +308,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 	        return [];
 	    }),
+	    "$children": resolveArguments(function (coll, context) {
+	        var resultingObject = {};
+	        for (var index = 0; index < coll.length; index++) {
+	            var element = coll[index];
+	            for (var prop in element) {
+	                if (resultingObject[prop] === undefined) {
+	                    resultingObject[prop] = element[prop];
+	                } else {
+	                    var tempValue = resultingObject[prop];
+	                    resultingObject[prop] = [tempValue];
+	                    resultingObject[prop].push(element[prop]);
+	                }
+	            }
+	        }
+	        return [resultingObject];
+	    }),
+	    "$descendants": resolveArguments(function (coll, context) {
+	        var result = [];
+	        for (var index = 0; index < coll.length; index++) {
+	            var element = coll[index];
+	            getDescendantsValue(element, result);
+	        }
+	        return result;
+	    }),
 	    "$empty": function $empty(coll) {
 	        return [coll.length === 0];
 	    },
@@ -352,6 +385,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    },
 	    // TODO startsWith probably needs an argument
 	    // and why does .startsWith act as a filter, while .matches returns a boolean?
+	    "$memberOf": resolveArguments(function (coll, context, regularEx) {
+	        throw new Error('We haven\'t implemented method memberOf yet.');
+	    }),
 	    "$today": function $today() {
 	        return [new Date().toLocaleDateString()];
 	    },
@@ -375,7 +411,33 @@ return /******/ (function(modules) { // webpackBootstrap
 	    };
 	};
 
-	function validateMathOperation(lhs, rhs, fnName) {
+	function getDescendantsValue(obj, result) {
+	    for (var prop in obj) {
+	        if (_typeof(obj[prop]) === "object") {
+	            //result.push(obj[prop]);
+	            if (Array.isArray(obj[prop])) {
+	                var array = obj[prop];
+	                for (var index = 0; index < array.length; index++) {
+	                    var element = array[index];
+	                    result.push(element);
+	                    if ((typeof element === 'undefined' ? 'undefined' : _typeof(element)) === "object") {
+	                        getDescendantsValue(element, result);
+	                    }
+	                }
+	            } else {
+	                //was obj
+	                result.push(obj[prop]);
+	                getDescendantsValue(obj[prop], result);
+	            }
+	        } else {
+	            var tempObj = {};
+	            tempObj[prop] = obj[prop];
+	            result.push(tempObj);
+	        }
+	    }
+	}
+
+	function validateMathOperation(lhs, rhs, fnName, onlyNumbers) {
 
 	    var errorMessage = checkForMoreThanOneElementInExpression(rhs, lhs, fnName);
 	    if (errorMessage != null) {
@@ -386,7 +448,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	        throw new Error(fnName + ': Operands must be of the same type.');
 	    }
 
-	    //TODO: check if both are numbers
+	    if (onlyNumbers) {
+	        if (typeof lhs[0] !== 'number' || typeof rhs[0] !== 'number') {
+	            throw new Error(fnName + ": Operands must be of type number.");
+	        }
+	    }
 	}
 
 	function checkForMoreThanOneElementInExpression(lhs, rhs, functName) {
@@ -482,27 +548,27 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return getUniqueValues(lhs.concat(rhs));
 	    },
 	    "+": function _(lhs, rhs) {
-	        validateMathOperation(lhs, rhs, "+");
+	        validateMathOperation(lhs, rhs, "+", false);
 	        return [lhs[0] + rhs[0]];
 	    },
 	    "*": function _(lhs, rhs) {
-	        validateMathOperation(lhs, rhs, "*");
+	        validateMathOperation(lhs, rhs, "*", true);
 	        return [lhs[0] * rhs[0]];
 	    },
 	    "/": function _(lhs, rhs) {
-	        validateMathOperation(lhs, rhs, "/");
+	        validateMathOperation(lhs, rhs, "/", true);
 	        return [lhs[0] / rhs[0]];
 	    },
 	    "-": function _(lhs, rhs) {
-	        validateMathOperation(lhs, rhs, "-");
+	        validateMathOperation(lhs, rhs, "-", true);
 	        return [lhs[0] - rhs[0]];
 	    },
 	    "div": function div(lhs, rhs) {
-	        validateMathOperation(lhs, rhs, "div");
+	        validateMathOperation(lhs, rhs, "div", true);
 	        return [Math.floor(lhs[0] / rhs[0])];
 	    },
 	    "mod": function mod(lhs, rhs) {
-	        validateMathOperation(lhs, rhs, "mod");
+	        validateMathOperation(lhs, rhs, "mod", true);
 	        return [lhs[0] % rhs[0]];
 	    },
 	    "&": whenSingle(function (lhs, rhs) {
@@ -543,6 +609,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return [Object.keys(lhsMap).every(function (k) {
 	            return k in rhsMap;
 	        })];
+	    },
+	    "as": function as(lhs, rhs) {
+	        throw new Error('We haven\'t implemented method "as" yet.');
+	    },
+	    "is": function is(lhs, rhs) {
+	        throw new Error('We haven\'t implemented method "is" yet.');
 	    },
 	    "~": function _(lhs, rhs) {
 	        return [JSON.stringify(lhs.map(JSON.stringify).sort()) === JSON.stringify(rhs.map(JSON.stringify).sort())];

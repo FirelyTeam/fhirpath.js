@@ -97,6 +97,15 @@ var functionBank = {
      "$select": applyToEach((item, context, conditions) =>
        run([item], withTree(context,conditions))
     ),
+    "$repeat": applyToEach((item,context, conditions)=>{
+       throw new Error('We haven\'t implemented method repeat yet.');
+    }),
+    "$is": applyToEach((item,context, conditions)=>{
+       throw new Error('We haven\'t implemented method is yet.');
+    }),
+    "$as": applyToEach((item,context, conditions)=>{
+       throw new Error('We haven\'t implemented method as yet.');
+    }),
     "$constant": (_, context, val)=>{
         return [val]
     },
@@ -109,9 +118,9 @@ var functionBank = {
 	},
     "$last": (coll)=> coll.slice(-1),
     "$tail": (coll)=> coll.slice(1),
-    "$item": resolveArguments((coll, context, i) => coll.slice(i,i+1)),
-    "$skip": resolveArguments((coll, context, i) => coll.slice(i)),
-    "$take": resolveArguments((coll, context, i) => coll.slice(0,i)),
+    "$item": resolveArguments((coll, context, i) => coll.slice(i[0],i[0]+1)),
+    "$skip": resolveArguments((coll, context, i) => coll.slice(i[0])),
+    "$take": resolveArguments((coll, context, i) => coll.slice(0,i[0])),
     // TODO: Clarify what collections are accepted by substring
     "$substring": resolveArguments((coll, context, start, count) => {
       validateStringManipulation(coll, 'substring');
@@ -204,6 +213,30 @@ var functionBank = {
         }
         return[];
     }),
+    "$children": resolveArguments((coll, context)=>{
+        var resultingObject = {};
+        for (var index = 0; index < coll.length; index++) {
+            var element = coll[index];
+            for(var prop in element){
+                if(resultingObject[prop] === undefined){
+                    resultingObject[prop] = element[prop];
+                }else{
+                    var tempValue = resultingObject[prop];
+                    resultingObject[prop] = [tempValue];
+                    resultingObject[prop].push(element[prop]);
+                }
+            }
+        }
+        return [resultingObject];
+    }),
+    "$descendants": resolveArguments((coll, context)=>{
+        var result = [];
+        for (var index = 0; index < coll.length; index++) {
+            var element = coll[index];
+            getDescendantsValue(element, result);          
+        }
+        return result;
+    }),
     "$empty": (coll)=>[coll.length === 0],
     "$not": (coll) => [!coerce.boolean(coll)],
     "$all": (coll) => [coerce.boolean(coll)],
@@ -244,6 +277,9 @@ var functionBank = {
     },
    // TODO startsWith probably needs an argument
    // and why does .startsWith act as a filter, while .matches returns a boolean?
+  "$memberOf": resolveArguments((coll, context, regularEx) => {
+       throw new Error('We haven\'t implemented method memberOf yet.')
+    }),
    "$today":()=>[new Date().toLocaleDateString()],
    "$now":()=>[new Date().toString()]
 }
@@ -259,19 +295,48 @@ var whenSingleComparison = (fn) => (lhs, rhs) =>{
     return fn(lhs[0], rhs[0]);    
 }
 
- function validateMathOperation(lhs, rhs, fnName) {
+ function getDescendantsValue(obj, result){
+     for(var prop in obj){
+         if(typeof(obj[prop]) === "object"){
+             //result.push(obj[prop]);
+             if(Array.isArray(obj[prop])){
+                 var array = obj[prop];
+                 for (var index = 0; index < array.length; index++) {
+                     var element = array[index];
+                     result.push(element);
+                     if(typeof element === "object"){
+                         getDescendantsValue(element, result);
+                     }                     
+                 }
+             }else{
+                 //was obj
+                 result.push(obj[prop]);
+                 getDescendantsValue(obj[prop], result);
+             }            
+         }else{
+            var tempObj = {};
+            tempObj[prop] = obj[prop];
+            result.push(tempObj);
+         }
+     }
+ }
+ 
+ function validateMathOperation(lhs, rhs, fnName, onlyNumbers) {
       
         var errorMessage = checkForMoreThanOneElementInExpression(rhs, lhs, fnName);
         if (errorMessage != null) {
             throw new Error(errorMessage);
-        }
-        
+        }        
        
         if(typeof lhs[0] !== typeof rhs[0]){
             throw new Error(fnName+': Operands must be of the same type.');
         }
         
-         //TODO: check if both are numbers
+        if(onlyNumbers){
+            if(typeof lhs[0] !== 'number' || typeof rhs[0] !== 'number'){
+                throw new Error(fnName + ": Operands must be of type number.")
+            }
+        }
  }
  
  function checkForMoreThanOneElementInExpression(lhs, rhs, functName){
@@ -361,27 +426,27 @@ var operatorBank = {
 			return getUniqueValues(lhs.concat(rhs));
 		},
     "+": (lhs, rhs)=>{
-        validateMathOperation(lhs, rhs, "+");
+        validateMathOperation(lhs, rhs, "+", false);
         return [lhs[0] + rhs[0]];
     },
 	 "*": (lhs, rhs)=>{
-        validateMathOperation(lhs, rhs, "*");
+        validateMathOperation(lhs, rhs, "*", true);
         return [lhs[0] * rhs[0]];
     },
 	 "/": (lhs, rhs)=>{
-        validateMathOperation(lhs, rhs, "/");
+        validateMathOperation(lhs, rhs, "/", true);
         return [lhs[0] / rhs[0]];
     },
     "-": (lhs, rhs)=>{
-        validateMathOperation(lhs, rhs, "-");
+        validateMathOperation(lhs, rhs, "-", true);
         return [lhs[0] - rhs[0]];
     },
 	"div":  (lhs, rhs)=>{
-        validateMathOperation(lhs, rhs, "div");
+        validateMathOperation(lhs, rhs, "div", true);
         return [Math.floor(lhs[0] / rhs[0])];
     },
 	"mod": (lhs, rhs)=>{
-        validateMathOperation(lhs, rhs, "mod");
+        validateMathOperation(lhs, rhs, "mod", true);
         return [lhs[0] % rhs[0]];
     },
     "&": whenSingle((lhs, rhs)=>{
@@ -415,6 +480,12 @@ var operatorBank = {
         let lhsMap = uniqueValueMap(lhs)
         let rhsMap = uniqueValueMap(rhs)
         return [Object.keys(lhsMap).every((k)=> k in rhsMap)]
+    },
+    "as": (lhs, rhs)=>{
+        throw new Error('We haven\'t implemented method "as" yet.');
+    },
+    "is": (lhs, rhs)=>{
+        throw new Error('We haven\'t implemented method "is" yet.');
     },
     "~": (lhs, rhs)=> [
         JSON.stringify(lhs.map(JSON.stringify).sort()) ===
