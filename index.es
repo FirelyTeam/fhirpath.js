@@ -98,13 +98,13 @@ var functionBank = {
        run([item], withTree(context,conditions))
     ),
     "$repeat": applyToEach((item,context, conditions)=>{
-       throw new Error('We haven\'t implemented method repeat yet.');
+       throw new Error('We haven\'t implemented method "repeat" yet.');
     }),
-    "$is": applyToEach((item,context, conditions)=>{
-       throw new Error('We haven\'t implemented method is yet.');
+    "$isType": applyToEach((item,context, conditions)=>{
+       throw new Error('We haven\'t implemented method "isType" yet.');
     }),
-    "$as": applyToEach((item,context, conditions)=>{
-       throw new Error('We haven\'t implemented method as yet.');
+    "$asType": applyToEach((item,context, conditions)=>{
+       throw new Error('We haven\'t implemented method "asType" yet.');
     }),
     "$constant": (_, context, val)=>{
         return [val]
@@ -196,8 +196,8 @@ var functionBank = {
       var isarraySubset = isSubsetOf(paramColl, coll);
         return [isarraySubset];
     }),
-    "$contains": resolveArguments((coll, context, searchString) => {
-         validateStringManipulationWithParam(coll, searchString, 'contains');
+    "$containsString": resolveArguments((coll, context, searchString) => {
+         validateStringManipulationWithParam(coll, searchString, 'containsString');
         var input = coll[0],
         searchStringInput = searchString[0];
         if(typeof input !== 'undefined'){
@@ -480,6 +480,11 @@ var operatorBank = {
         let lhsMap = uniqueValueMap(lhs)
         let rhsMap = uniqueValueMap(rhs)
         return [Object.keys(lhsMap).every((k)=> k in rhsMap)]
+    },    
+    "contains": (lhs, rhs) => {
+        let lhsMap = uniqueValueMap(lhs)
+        let rhsMap = uniqueValueMap(rhs)
+        return [Object.keys(rhsMap).every((k)=> k in lhsMap)]
     },
     "as": (lhs, rhs)=>{
         throw new Error('We haven\'t implemented method "as" yet.');

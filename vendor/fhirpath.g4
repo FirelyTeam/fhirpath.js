@@ -21,7 +21,8 @@ expr returns [ret]:
         a=expr op=('>' | '<' | '<=' | '>=') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
         a=expr op=('is' | 'as') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
         a=expr op=('=' | '~' | '!=' | '!~') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
-        a=expr op=('in' |'and' | 'xor' | 'or' | 'implies') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
+        a=expr op=('in' | 'contains') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
+        a=expr op=('and' | 'xor' | 'or' | 'implies') b=expr {$ret= [$op.text, $a.ret, $b.ret]}|
         '(' a=expr ')' {$ret = $a.ret}|
         predicate {$ret = $predicate.ret}|
         fp_const {$ret = $fp_const.ret};
