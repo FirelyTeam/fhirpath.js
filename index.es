@@ -243,7 +243,6 @@ var functionBank = {
     "$any": (coll, context, conditions) =>
         [functionBank.$where(coll, context, conditions).length > 0],
     "$count": (coll) => [coll.length],
-    "$lookup": (coll, context, tag) => [lookup(tag, context)],
     "$iif": (coll, context, criteriumExp, trueExp, otherwiseExpr) => {
         var criteriumResult = run(coll, withTree(context,criteriumExp));
         if(coerce.boolean(criteriumResult)){
@@ -534,21 +533,6 @@ var defaultLookups = {
   "ucum": "http://unitsofmeasure.org",
   "vs-": "http://hl7.org/fhir/ValueSet/",
   "ext-": "http://hl7.org/fhir/StructureDefinition/"
-}
-
-var lookup = (tag, context) => {
-
-    if (context.lookups[tag]){
-        return context.lookups[tag]
-    }
-
-    let m = tag.match(/(.*?-)(.*)/)
-    if (m && context.lookups[m[1]]){
-        return context.lookups[m[1]] + m[2]
-    }
-
-    throw new Error(`Undefined lookup tag: %${tag}.
-                     We know: ${Object.keys(context.lookups)}`)
 }
 
 let withConstants = (lookups) =>
